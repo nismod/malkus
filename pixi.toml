@@ -1,0 +1,26 @@
+[workspace]
+authors = ["Fred Thomas <fred.thomas@eci.ox.ac.uk>"]
+channels = ["conda-forge"]
+name = "tc-wind-lib"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = ">=3.14"
+geopandas = "*"
+numpy = "*"
+numba = "*"
+pandas = "*"
+pyarrow = "*"
+xarray = "*"
+zarr = ">=2.18,<3"
+rasterio = "*"
+rioxarray = "*"
+scipy = "*"
+pytest = "*"
+jupyter = ">=1.1.1,<2"
+
+[pypi-dependencies]
+tc-wind-lib = { path = ".", editable = true }

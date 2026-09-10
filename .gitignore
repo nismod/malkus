@@ -1,0 +1,11 @@
+**/.ipynb_checkpoints/*
+
+.vscode/
+
+**/*.egg-info/*
+**/__pycache__/*
+
+data/
+
+.pixi/*
+!.pixi/config.toml
