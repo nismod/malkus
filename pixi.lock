@@ -2947,7 +2947,7 @@ packages:
 - pypi: ./
   name: malkus
   version: 0.1.0
-  sha256: 8343920d170ac3b375758963025538cdcfbe4cc45cb16d7efbfbfa94ef92e62c
+  sha256: 11e382da315e01e9a193bd19c1799d9bbb911d38b299fcc9e981fed8ffde430f
   requires_dist:
   - numpy
   - numba
@@ -2957,7 +2957,7 @@ packages:
   - zarr>=2.18,<3
   - rasterio
   - rioxarray
-  requires_python: '>=3.14'
+  requires_python: '>=3.12'
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/mapclassify-2.10.0-pyhd8ed1ab_1.conda
   sha256: 967841d300598b17f76ba812e7dae642176692ed2a6735467b93c2b2debe35c1
