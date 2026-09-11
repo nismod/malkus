@@ -3,7 +3,7 @@ from collections.abc import Callable
 import pandas as pd
 import pytest
 
-from tc_wind_lib import TrackSet, WindSpeedReference
+from malkus import TrackSet, WindSpeedReference
 
 
 @pytest.fixture

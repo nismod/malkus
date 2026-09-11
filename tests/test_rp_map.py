@@ -6,7 +6,7 @@ import rasterio
 import xarray as xr
 import zarr
 
-from tc_wind_lib import (
+from malkus import (
     RegularGrid,
     ReturnPeriodMapSet,
     TrackSet,

@@ -2944,6 +2944,21 @@ packages:
   purls: []
   size: 191060
   timestamp: 1753889274283
+- pypi: ./
+  name: malkus
+  version: 0.1.0
+  sha256: 8343920d170ac3b375758963025538cdcfbe4cc45cb16d7efbfbfa94ef92e62c
+  requires_dist:
+  - numpy
+  - numba
+  - pandas
+  - pyarrow
+  - xarray
+  - zarr>=2.18,<3
+  - rasterio
+  - rioxarray
+  requires_python: '>=3.14'
+  editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/mapclassify-2.10.0-pyhd8ed1ab_1.conda
   sha256: 967841d300598b17f76ba812e7dae642176692ed2a6735467b93c2b2debe35c1
   md5: cc293b4cad9909bf66ca117ea90d4631
@@ -4262,21 +4277,6 @@ packages:
   - pkg:pypi/stack-data?source=hash-mapping
   size: 26988
   timestamp: 1733569565672
-- pypi: ./
-  name: tc-wind-lib
-  version: 0.1.0
-  sha256: e73d442be6a533dec9877135d0f3f80b006ed7b0738cfa65baea7a6085466b1a
-  requires_dist:
-  - numpy
-  - numba
-  - pandas
-  - pyarrow
-  - xarray
-  - zarr>=2.18,<3
-  - rasterio
-  - rioxarray
-  requires_python: '>=3.14'
-  editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/terminado-0.18.1-pyhc90fa1f_1.conda
   sha256: 6b6727a13d1ca6a23de5e6686500d0669081a117736a87c8abf444d60c1e40eb
   md5: 17b43cee5cc84969529d5d0b0309b2cb

@@ -20,7 +20,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 
-from tc_wind_lib import (
+from malkus import (
     RegularGrid,
     ReturnPeriodMapSet,
     SurfaceRoughness,

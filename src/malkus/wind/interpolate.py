@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 
-from tc_wind_lib.tracks.schema import require_columns
+from malkus.tracks.schema import require_columns
 
 
 INTERPOLATED_COLUMNS = (

@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from tc_wind_lib.hazard.grid.geodesic import bearing_and_great_circle_distance
-from tc_wind_lib.tracks.source import WindSpeedReference
+from malkus.hazard.grid.geodesic import bearing_and_great_circle_distance
+from malkus.tracks.source import WindSpeedReference
 
 from .advection import lin_chavas_2012
 from .decay import sigmoid_decay

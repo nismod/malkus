@@ -6,7 +6,7 @@ import pytest
 import rasterio
 from rasterio.transform import from_bounds
 
-from tc_wind_lib import (
+from malkus import (
     RegularGrid,
     SurfaceRoughness,
     TrackSet,
@@ -16,7 +16,7 @@ from tc_wind_lib import (
     downscale_winds,
     initialize_wind_footprints,
 )
-from tc_wind_lib.hazard.footprint import (
+from malkus.hazard.footprint import (
     _compute_event_footprint,
     _prepare_track_for_wind_evaluation,
 )

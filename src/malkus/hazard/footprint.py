@@ -12,14 +12,14 @@ import pandas as pd
 import xarray as xr
 import zarr
 
-from tc_wind_lib.hazard.grid.grid import RegularGrid
-from tc_wind_lib.tracks.source import WindSpeedReference
-from tc_wind_lib.tracks.trackset import TrackSet
-from tc_wind_lib.wind.advection import ADVECTIVE_SPEED_FRACTION
-from tc_wind_lib.wind.env_pressure import ENV_PRESSURE
-from tc_wind_lib.wind.evaluate import evaluate_at_points
-from tc_wind_lib.wind.interpolate import derive_track_motion, interpolate_track
-from tc_wind_lib.wind.profiles import WindProfile, holland_1980
+from malkus.hazard.grid.grid import RegularGrid
+from malkus.tracks.source import WindSpeedReference
+from malkus.tracks.trackset import TrackSet
+from malkus.wind.advection import ADVECTIVE_SPEED_FRACTION
+from malkus.wind.env_pressure import ENV_PRESSURE
+from malkus.wind.evaluate import evaluate_at_points
+from malkus.wind.interpolate import derive_track_motion, interpolate_track
+from malkus.wind.profiles import WindProfile, holland_1980
 
 
 WIND_LEVELS = frozenset({"gradient", "surface"})

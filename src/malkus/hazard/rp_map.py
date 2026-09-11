@@ -11,7 +11,7 @@ import rasterio
 import xarray as xr
 from rasterio.transform import from_origin
 
-from tc_wind_lib.hazard.footprint import WIND_VARIABLE, WindFootprintSet
+from malkus.hazard.footprint import WIND_VARIABLE, WindFootprintSet
 
 
 @dataclass(frozen=True, init=False)

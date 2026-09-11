@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from tc_wind_lib import WindSpeedReference, evaluate_at_points
+from malkus import WindSpeedReference, evaluate_at_points
 
 
 def test_point_evaluation_exposes_speed_and_components():

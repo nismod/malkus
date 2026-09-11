@@ -11,7 +11,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds as window_from_bounds
 
-from tc_wind_lib.hazard.grid.grid import RegularGrid
+from malkus.hazard.grid.grid import RegularGrid
 
 
 ROUGHNESS_MAPPING_COLUMNS = frozenset({"glob_cover_2009_id", "roughness_length_m"})

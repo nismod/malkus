@@ -3,8 +3,8 @@ import pandas as pd
 import rasterio
 from rasterio.transform import from_bounds
 
-from tc_wind_lib import RegularGrid, surface_roughness_factors
-from tc_wind_lib.wind.downscale.roughness import roughness_from_land_cover
+from malkus import RegularGrid, surface_roughness_factors
+from malkus.wind.downscale.roughness import roughness_from_land_cover
 
 
 def test_land_cover_mapping_is_averaged_onto_grid(tmp_path):

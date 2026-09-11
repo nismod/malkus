@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tc_wind_lib import TrackSet, TrackSource, WindSpeedReference
+from malkus import TrackSet, TrackSource, WindSpeedReference
 
 
 def test_trackset_normalises_and_selects_tracks(track_frame: Callable[[], pd.DataFrame]):

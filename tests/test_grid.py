@@ -1,6 +1,6 @@
 import pytest
 
-from tc_wind_lib.hazard.grid.geodesic import bearing_and_great_circle_distance
+from malkus.hazard.grid.geodesic import bearing_and_great_circle_distance
 
 
 def test_geodesic_returns_expected_equatorial_distance():
