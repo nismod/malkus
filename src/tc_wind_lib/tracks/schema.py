@@ -108,7 +108,7 @@ def validate_track_frame(frame: pd.DataFrame) -> None:
     for column in frame.select_dtypes(include="number"):
         values = frame[column].to_numpy(dtype=float, na_value=np.nan)
         non_finite_fraction = float((~np.isfinite(values)).mean())
-        logger.info(
+        logger.debug(
             "Track column %s non-finite fraction: %.6f",
             column,
             non_finite_fraction,
