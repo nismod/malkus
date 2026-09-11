@@ -42,17 +42,27 @@ if __name__ == "__main__":
     t0 = datetime.now()
 
     bbox = (56.2, -21.8, 59.1, -18.9)  # Mauritius
-    source = TrackSource.EMANUEL
-    scenario = "585"
-    gcm = "cesm2"
-    epoch = 2005
-    n_years = 200
     interpolation_frequency = "30min"
     grid_resolution = 0.1
-    return_periods = [1, 2, 5, 10, 20]
 
     input_dir = Path("data/in/")
-    tracks_path = input_dir / f"tracks/emanuel_ssp-{scenario}_gcm-{gcm}_epoch-{epoch}/tracks.geoparquet"
+
+#   source = TrackSource.EMANUEL
+#   tracks_path = input_dir / "tracks/emanuel_ssp-585_gcm-cesm2_epoch-2005/tracks.geoparquet"
+#   scenario = "585"
+#   gcm = "cesm2"
+#   epoch = 2005
+#   n_years = 200
+#   return_periods = [1, 2, 5, 10, 20]
+
+    source = TrackSource.CHAZ
+    tracks_path = input_dir / "tracks/CHAZ_SSP-585_GCM-CESM2_epoch-2010/tracks.geoparquet"
+    gcm = "CESM2"
+    scenario = "SSP585"
+    epoch = 2010
+    n_years = 1000
+    return_periods = [1, 2, 5, 10, 20, 50, 100]
+
     land_cover_path = input_dir / "land_cover/glob_cover_2009/GLOBCOVER_L4_200901_200912_V2.3.tif"
     mapping_path = input_dir / "land_cover/land_cover_to_surface_roughness.csv"
 
