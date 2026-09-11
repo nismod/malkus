@@ -129,7 +129,6 @@ def initialize_wind_footprints(
         {
             "wind_level": level,
             "grid_resolution_deg": grid.resolution,
-            "event_id_source": "track_id",
         }
     )
     root = zarr.open_group(path, mode="w")
@@ -524,7 +523,6 @@ def _footprint_dataset(
             **attrs,
             "wind_level": level,
             "grid_resolution_deg": grid.resolution,
-            "event_id_source": "track_id",
         },
     )
 

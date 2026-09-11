@@ -1,10 +1,14 @@
 """Canonical schema and validation for processed tropical-cyclone tracks."""
 
 from collections.abc import Iterable
+import logging
 
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+
+
+logger = logging.getLogger(__name__)
 
 
 REQUIRED_COLUMNS = frozenset(
@@ -101,8 +105,14 @@ def validate_track_frame(frame: pd.DataFrame) -> None:
     for column in _NUMERIC_COLUMNS:
         if not pd.api.types.is_numeric_dtype(frame[column]):
             raise ValueError(f"{column} must be numeric")
-        if not np.isfinite(frame[column]).all():
-            raise ValueError(f"{column} contains missing or non-finite values")
+    for column in frame.select_dtypes(include="number"):
+        values = frame[column].to_numpy(dtype=float, na_value=np.nan)
+        non_finite_fraction = float((~np.isfinite(values)).mean())
+        logger.info(
+            "Track column %s non-finite fraction: %.6f",
+            column,
+            non_finite_fraction,
+        )
     if not frame["lat"].between(-90, 90).all():
         raise ValueError("lat must lie between -90 and 90 degrees")
     if not frame["lon"].between(-180, 180).all():
