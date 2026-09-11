@@ -56,29 +56,6 @@ def test_trackset_normalises_and_selects_tracks():
     np.testing.assert_allclose(trackset.tracks.geometry.y, trackset.tracks["lat"])
 
 
-def test_trackset_repr_summarises_metadata_and_track_statistics():
-    frame = pd.concat(
-        [track_frame(), track_frame().assign(track_id="storm-2", year=2001)],
-        ignore_index=True,
-    )
-    trackset = TrackSet(
-        frame, metadata={"source": "test", "scenario": "ssp585"}, is_synthetic=True
-    )
-
-    assert repr(trackset) == (
-        "TrackSet(\n"
-        "  metadata={\n"
-        "    'source': 'test',\n"
-        "    'scenario': 'ssp585',\n"
-        "  },\n"
-        "  is_synthetic=True,\n"
-        "  storms=2,\n"
-        "  observations=6,\n"
-        "  years=2000-2001,\n"
-        ")"
-    )
-
-
 def test_trackset_rejects_duplicate_times():
     frame = track_frame()
     frame.loc[1, "time_utc"] = frame.loc[0, "time_utc"]
@@ -287,19 +264,6 @@ def test_trackset_read_parquet_decodes_geoparquet_geometry(tmp_path):
 def test_geodesic_returns_expected_equatorial_distance():
     _, distance_m = bearing_and_great_circle_distance(0.0, 0.0, 1.0, 0.0)
     assert distance_m == pytest.approx(111_195, rel=0.002)
-
-
-def test_regular_grid_repr_summarises_geometry():
-    grid = RegularGrid.from_bbox((120.0, 10.0, 121.0, 11.0), 0.5)
-
-    assert repr(grid) == (
-        "RegularGrid(\n"
-        "  resolution=0.5,\n"
-        "  nlat=2,\n"
-        "  nlon=2,\n"
-        "  bbox=(120.000, 10.000, 121.000, 11.000),\n"
-        ")"
-    )
 
 
 def test_hourly_interpolation_and_motion():

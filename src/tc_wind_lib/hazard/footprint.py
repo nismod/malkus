@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import indent
 from typing import Any, Literal
 
 import numpy as np
@@ -42,6 +43,18 @@ class WindFootprintSet:
             raise ValueError("Provide exactly one of dataset or path")
         if self.dataset is not None:
             _validate_footprint_dataset(self.dataset)
+
+    def __repr__(self) -> str:
+        """Return the backing store location and xarray dataset summary."""
+
+        path = None if self.path is None else str(self.path)
+        return (
+            "WindFootprintSet(\n"
+            f"  path={path!r},\n"
+            "  data=\n"
+            f"{indent(repr(self.data), '    ')}\n"
+            ")"
+        )
 
     @classmethod
     def open(cls, path: str | Path) -> "WindFootprintSet":
