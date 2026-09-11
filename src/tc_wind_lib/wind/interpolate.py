@@ -49,7 +49,7 @@ def interpolate_track(track: pd.DataFrame, frequency: str = "1h") -> pd.DataFram
 
 
 def derive_track_motion(track: pd.DataFrame) -> pd.DataFrame:
-    """Add heading and speed, repeating the penultimate motion at the end."""
+    """Add heading, speed, and signed speed acceleration to a track."""
 
     require_columns(track, ("time_utc", "lat", "lon"), "derive_track_motion")
     if len(track) < 2:
@@ -67,5 +67,9 @@ def derive_track_motion(track: pd.DataFrame) -> pd.DataFrame:
     if (seconds <= 0).any():
         raise ValueError("Track timestamps must be strictly increasing")
     result["translation_heading_deg"] = np.append(heading, heading[-1])
-    result["translation_speed_ms"] = np.append(distance_m / seconds, distance_m[-1] / seconds[-1])
+    translation_speed_ms = np.append(distance_m / seconds, distance_m[-1] / seconds[-1])
+    result["translation_speed_ms"] = translation_speed_ms
+    acceleration = np.zeros(len(result), dtype=float)
+    acceleration[:-1] = np.diff(translation_speed_ms) / seconds
+    result["translation_acceleration_ms2"] = acceleration
     return result

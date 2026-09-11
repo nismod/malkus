@@ -55,6 +55,19 @@ class RegularGrid:
         object.__setattr__(self, "lats", lats)
         object.__setattr__(self, "lons", lons)
 
+    def __repr__(self) -> str:
+        """Return a compact summary of the grid geometry."""
+
+        bbox = ", ".join(f"{coordinate:.3f}" for coordinate in self.bbox)
+        return (
+            "RegularGrid(\n"
+            f"  resolution={self.resolution},\n"
+            f"  nlat={self.nlat},\n"
+            f"  nlon={self.nlon},\n"
+            f"  bbox=({bbox}),\n"
+            ")"
+        )
+
     @classmethod
     def from_bbox(
         cls, bounds: tuple[float, float, float, float], resolution: float
@@ -81,6 +94,18 @@ class RegularGrid:
     @property
     def nlon(self) -> int:
         return len(self.lons)
+
+    @property
+    def bbox(self) -> tuple[float, float, float, float]:
+        """Return cell-edge bounds as ``(min_lon, min_lat, max_lon, max_lat)``."""
+
+        half_resolution = self.resolution / 2
+        return (
+            float(self.lons[0] - half_resolution),
+            float(self.lats[0] - half_resolution),
+            float(self.lons[-1] + half_resolution),
+            float(self.lats[-1] + half_resolution),
+        )
 
     @property
     def flat_points(self) -> PointCloud:

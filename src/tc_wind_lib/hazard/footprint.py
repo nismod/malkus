@@ -12,7 +12,9 @@ import xarray as xr
 import zarr
 
 from tc_wind_lib.hazard.grid.grid import RegularGrid
+from tc_wind_lib.tracks.source import WindSpeedReference
 from tc_wind_lib.tracks.trackset import TrackSet
+from tc_wind_lib.wind.advection import ADVECTIVE_SPEED_FRACTION
 from tc_wind_lib.wind.env_pressure import ENV_PRESSURE
 from tc_wind_lib.wind.evaluate import evaluate_at_points
 from tc_wind_lib.wind.interpolate import derive_track_motion, interpolate_track
@@ -107,11 +109,9 @@ def initialize_wind_footprints(
     if level not in WIND_LEVELS:
         raise ValueError(f"level must be one of {sorted(WIND_LEVELS)}")
     path = Path(path)
-    if path.exists():
-        raise FileExistsError(f"Footprint store already exists: {path}")
 
     event_ids, years = _event_metadata(trackset)
-    attrs = {**trackset.metadata, **({} if metadata is None else metadata)}
+    attrs = {**trackset.footprint_metadata, **({} if metadata is None else metadata)}
     attrs.update(
         {
             "wind_level": level,
@@ -149,6 +149,8 @@ def compute_gradient_winds(
     profile: WindProfile = holland_1980,
     interpolation_frequency: str = "1h",
     evaluation_radius_m: float = 1_000_000,
+    interpolated_tracks_path: str | Path | None = None,
+    storm_qc_path: str | Path | None = None,
 ) -> WindFootprintSet:
     """Compute maximum gradient-wind footprints for every track in a TrackSet.
 
@@ -157,17 +159,36 @@ def compute_gradient_winds(
     This makes independent external event partitions safe to calculate.
     """
 
+    wind_speed_reference = trackset.require_wind_speed_reference()
+    prepared_tracks = [
+        (
+            event_id,
+            _prepare_track_for_wind_evaluation(
+                track,
+                interpolation_frequency=interpolation_frequency,
+                wind_speed_reference=wind_speed_reference,
+            ),
+        )
+        for event_id, track in trackset.iter_tracks()
+    ]
+    _write_qc_outputs(
+        prepared_tracks,
+        model_family=trackset.model_family,
+        interpolated_tracks_path=interpolated_tracks_path,
+        storm_qc_path=storm_qc_path,
+    )
+
     if output is None:
         event_ids, years = _event_metadata(trackset)
         fields = [
-            _compute_event_footprint(
+            _evaluate_prepared_event_footprint(
                 track,
                 grid,
                 profile=profile,
-                interpolation_frequency=interpolation_frequency,
                 evaluation_radius_m=evaluation_radius_m,
+                wind_speed_reference=wind_speed_reference,
             )
-            for _, track in trackset.iter_tracks()
+            for _, track in prepared_tracks
         ]
         array = (
             np.stack(fields).astype(np.float32, copy=False)
@@ -182,7 +203,7 @@ def compute_gradient_winds(
                 grid,
                 level="gradient",
                 attrs={
-                    **trackset.metadata,
+                    **trackset.footprint_metadata,
                     "interpolation_frequency": interpolation_frequency,
                     "evaluation_radius_m": evaluation_radius_m,
                     "wind_profile": getattr(profile, "__name__", type(profile).__name__),
@@ -206,14 +227,14 @@ def compute_gradient_winds(
         interpolation_frequency=interpolation_frequency,
         evaluation_radius_m=evaluation_radius_m,
     )
-    for event_id, track in trackset.iter_tracks():
+    for event_id, track in prepared_tracks:
         event_index = event_indices[event_id]
-        footprint = _compute_event_footprint(
+        footprint = _evaluate_prepared_event_footprint(
             track,
             grid,
             profile=profile,
-            interpolation_frequency=interpolation_frequency,
             evaluation_radius_m=evaluation_radius_m,
+            wind_speed_reference=wind_speed_reference,
         )
         root[WIND_VARIABLE][event_index] = footprint
         root["computed"][event_index] = True
@@ -279,18 +300,41 @@ def _compute_event_footprint(
     interpolation_frequency: str = "1h",
     evaluation_radius_m: float = 1_000_000,
 ) -> np.ndarray:
-    """Compute one event's maximum gradient-wind footprint on ``grid``."""
+    """Compute one earth-relative event footprint from a raw track."""
+
+    prepared = _prepare_track_for_wind_evaluation(
+        track,
+        interpolation_frequency=interpolation_frequency,
+        wind_speed_reference=WindSpeedReference.EARTH_RELATIVE,
+    )
+    return _evaluate_prepared_event_footprint(
+        prepared,
+        grid,
+        profile=profile,
+        evaluation_radius_m=evaluation_radius_m,
+        wind_speed_reference=WindSpeedReference.EARTH_RELATIVE,
+    )
+
+
+def _evaluate_prepared_event_footprint(
+    track: pd.DataFrame,
+    grid: RegularGrid,
+    *,
+    profile: WindProfile,
+    evaluation_radius_m: float,
+    wind_speed_reference: WindSpeedReference,
+) -> np.ndarray:
+    """Evaluate one prepared event track on a grid."""
 
     if evaluation_radius_m <= 0:
         raise ValueError("evaluation_radius_m must be positive")
     if len(track) < 2:
         return np.zeros(grid.shape, dtype=np.float32)
 
-    interpolated = derive_track_motion(interpolate_track(track, interpolation_frequency))
     flat_grid = grid.flat_points
     max_wind = np.zeros(grid.nlat * grid.nlon, dtype=np.float32)
 
-    for observation in interpolated.itertuples(index=False):
+    for observation in track.itertuples(index=False):
         indices = flat_grid.indices_within_radius(
             observation.lat, observation.lon, evaluation_radius_m
         )
@@ -316,10 +360,121 @@ def _compute_event_footprint(
             env_pressure_pa=float(env_pressure_hpa) * 100,
             track_heading_deg=observation.translation_heading_deg,
             translation_speed_ms=observation.translation_speed_ms,
+            wind_speed_reference=wind_speed_reference,
             profile=profile,
         )
         np.maximum.at(max_wind, indices, np.nan_to_num(speeds, nan=0.0))
     return max_wind.reshape(grid.shape)
+
+
+def _prepare_track_for_wind_evaluation(
+    track: pd.DataFrame,
+    *,
+    interpolation_frequency: str,
+    wind_speed_reference: WindSpeedReference,
+) -> pd.DataFrame:
+    """Interpolate a track and add motion and wind-frame QC fields."""
+
+    interpolated = interpolate_track(track, interpolation_frequency)
+    if len(interpolated) == 1:
+        result = interpolated.copy()
+        result["translation_heading_deg"] = 0.0
+        result["translation_speed_ms"] = 0.0
+        result["translation_acceleration_ms2"] = 0.0
+    else:
+        result = derive_track_motion(interpolated)
+
+    advective_wind_speed = (
+        result["translation_speed_ms"].to_numpy(dtype=float)
+        * ADVECTIVE_SPEED_FRACTION
+    )
+    maximum_wind_speed = result["max_wind_speed_ms"].to_numpy(dtype=float)
+    if wind_speed_reference == WindSpeedReference.EARTH_RELATIVE:
+        rotational_wind_speed = maximum_wind_speed - advective_wind_speed
+    elif wind_speed_reference == WindSpeedReference.EYE_RELATIVE:
+        rotational_wind_speed = maximum_wind_speed
+    else:
+        raise ValueError(f"cannot interpret {wind_speed_reference=}")
+    rotational_wind_nonpositive = rotational_wind_speed <= 0
+    chi = np.divide(
+        advective_wind_speed,
+        rotational_wind_speed,
+        out=np.full(len(result), np.inf, dtype=float),
+        where=~rotational_wind_nonpositive,
+    )
+    result["advective_wind_speed_ms"] = advective_wind_speed
+    result["rotational_max_wind_speed_ms"] = rotational_wind_speed
+    result["chi"] = chi
+    result["rotational_wind_nonpositive"] = rotational_wind_nonpositive
+    return result
+
+
+def _write_qc_outputs(
+    prepared_tracks: list[tuple[str, pd.DataFrame]],
+    *,
+    model_family: str | None,
+    interpolated_tracks_path: str | Path | None,
+    storm_qc_path: str | Path | None,
+) -> None:
+    """Optionally persist per-timestep and per-storm wind-generation QC."""
+
+    paths = [
+        Path(path)
+        for path in (interpolated_tracks_path, storm_qc_path)
+        if path is not None
+    ]
+    if not paths:
+        return
+
+    tables = [track for _, track in prepared_tracks]
+    if tables:
+        interpolated_tracks = pd.concat(tables, ignore_index=True)
+    else:
+        interpolated_tracks = pd.DataFrame()
+    interpolated_tracks = interpolated_tracks.drop(columns="geometry", errors="ignore")
+    interpolated_tracks["model_family"] = model_family
+
+    if storm_qc_path is not None:
+        storm_qc = _storm_qc_summary(interpolated_tracks)
+        storm_qc.to_parquet(storm_qc_path, index=False)
+    if interpolated_tracks_path is not None:
+        interpolated_tracks.to_parquet(interpolated_tracks_path, index=False)
+
+
+def _storm_qc_summary(interpolated_tracks: pd.DataFrame) -> pd.DataFrame:
+    if interpolated_tracks.empty:
+        return pd.DataFrame(
+            columns=[
+                "track_id",
+                "year",
+                "model_family",
+                "max_advective_wind_speed_ms",
+                "max_rotational_max_wind_speed_ms",
+                "max_chi",
+                "max_abs_translation_acceleration_ms2",
+                "n_nonpositive_rotational_wind_observations",
+            ]
+        )
+    summary = interpolated_tracks.assign(
+        abs_translation_acceleration_ms2=interpolated_tracks[
+            "translation_acceleration_ms2"
+        ].abs()
+    ).groupby("track_id", sort=False).agg(
+        year=("year", "first"),
+        model_family=("model_family", "first"),
+        max_advective_wind_speed_ms=("advective_wind_speed_ms", "max"),
+        max_rotational_max_wind_speed_ms=("rotational_max_wind_speed_ms", "max"),
+        max_chi=("chi", "max"),
+        max_abs_translation_acceleration_ms2=(
+            "abs_translation_acceleration_ms2",
+            "max",
+        ),
+        n_nonpositive_rotational_wind_observations=(
+            "rotational_wind_nonpositive",
+            "sum",
+        ),
+    )
+    return summary.reset_index()
 
 
 def _event_metadata(trackset: TrackSet) -> tuple[np.ndarray, np.ndarray]:

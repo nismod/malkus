@@ -3,6 +3,7 @@
 import numpy as np
 
 from tc_wind_lib.hazard.grid.geodesic import bearing_and_great_circle_distance
+from tc_wind_lib.tracks.source import WindSpeedReference
 
 from .advection import lin_chavas_2012
 from .decay import sigmoid_decay
@@ -21,6 +22,7 @@ def evaluate_at_points(
     env_pressure_pa: float,
     track_heading_deg: float,
     translation_speed_ms: float,
+    wind_speed_reference: WindSpeedReference = WindSpeedReference.EARTH_RELATIVE,
     profile: WindProfile = holland_1980,
     return_components: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
@@ -43,24 +45,30 @@ def evaluate_at_points(
         raise ValueError("min_pressure_pa must lie between 75,000 and 102,000")
     if env_pressure_pa <= min_pressure_pa:
         raise ValueError("env_pressure_pa must exceed min_pressure_pa")
-    if not (0 <= translation_speed_ms < 30):
-        raise ValueError("translation_speed_ms must lie between 0 and 30")
+    if not np.isfinite(translation_speed_ms) or translation_speed_ms < 0:
+        raise ValueError("translation_speed_ms must be finite and non-negative")
 
     azimuth_deg, radius_m = bearing_and_great_circle_distance(lons, lats, eye_lon, eye_lat)
     hemisphere = 1 if eye_lat >= 0 else -1
     advective = lin_chavas_2012(track_heading_deg, translation_speed_ms, hemisphere)
-    rotational_max = max_wind_speed_ms - abs(advective)
-    if rotational_max <= 0:
-        breakpoint()
-        raise ValueError("translation wind exceeds maximum wind speed")
+    if wind_speed_reference == WindSpeedReference.EARTH_RELATIVE:
+        rotational_max = max_wind_speed_ms - abs(advective)
+    elif wind_speed_reference == WindSpeedReference.EYE_RELATIVE:
+        rotational_max = max_wind_speed_ms
+    else:
+        raise ValueError(f"Unknown wind_speed_reference: {wind_speed_reference!r}")
     advective_field = advective * sigmoid_decay(radius_m / 1_000, 500, 0.004)
-    rotational_speed = profile(
-        radius_m,
-        v_max_ms=rotational_max,
-        r_max_m=radius_to_max_winds_m,
-        min_pressure_pa=min_pressure_pa,
-        env_pressure_pa=env_pressure_pa,
-        lat_deg=eye_lat,
+    rotational_speed = (
+        profile(
+            radius_m,
+            v_max_ms=rotational_max,
+            r_max_m=radius_to_max_winds_m,
+            min_pressure_pa=min_pressure_pa,
+            env_pressure_pa=env_pressure_pa,
+            lat_deg=eye_lat,
+        )
+        if rotational_max > 0
+        else np.zeros_like(radius_m)
     )
     angle = np.radians(azimuth_deg + hemisphere * 90)
     u_east = advective_field.real + rotational_speed * np.sin(angle)

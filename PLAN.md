@@ -301,12 +301,3 @@ rp = tc.return_period_maps(
     return_periods=[10, 25, 50, 100, 250],
 )
 ```
-
-## Open questions
-
-1. Should geometry be written when exporting to GeoParquet, or should exports
-   remain plain Parquet by default? A: Plain parquet
-2. Should global processing parallelism be event-first, tile-first, or support
-   both for SLURM workflows? A: event-first
-3. What metadata fields should be standardized on `TrackSet`? A: source (str), scenario (str, nullable), gcm (str, nullable), epoch (int), is_synthetic (bool)
-4. What plotting position should be the default for return periods?

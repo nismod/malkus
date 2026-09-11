@@ -2,12 +2,15 @@ import numba
 import numpy as np
 
 
+ADVECTIVE_SPEED_FRACTION = 0.56
+
+
 @numba.njit
 def lin_chavas_2012(
     eye_heading_deg: float,
     eye_speed_ms: float,
     hemisphere: int,
-    alpha: float = 0.56,
+    alpha: float = ADVECTIVE_SPEED_FRACTION,
     beta: float = 19.2,
 ) -> np.complex128:
     """

@@ -1,6 +1,7 @@
 """The primary catalogue object for canonical tropical-cyclone tracks."""
 
 from dataclasses import dataclass, field
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -11,6 +12,12 @@ import pyarrow.parquet as pq
 from shapely.geometry import box
 
 from .schema import normalise_track_frame, validate_track_frame
+from .source import (
+    IS_SYNTHETIC_BY_SOURCE,
+    WIND_SPEED_REFERENCE_BY_SOURCE,
+    TrackSource,
+    WindSpeedReference,
+)
 
 
 @dataclass(frozen=True)
@@ -23,8 +30,13 @@ class TrackSet:
 
     tracks: gpd.GeoDataFrame
     metadata: dict[str, Any] = field(default_factory=dict)
+    source: TrackSource | str | None = None
+    wind_speed_reference: WindSpeedReference | str | None = None
+    is_synthetic: bool | None = None
 
     def __post_init__(self) -> None:
+        if "is_synthetic" in self.metadata:
+            raise ValueError("Use the is_synthetic TrackSet field, not metadata")
         normalised = normalise_track_frame(self.tracks)
         validate_track_frame(normalised)
         normalised = normalised.drop(columns="geometry", errors="ignore")
@@ -34,6 +46,38 @@ class TrackSet:
             crs="EPSG:4326",
         )
         object.__setattr__(self, "tracks", tracks)
+        source = _normalise_source(self.source)
+        reference = _normalise_wind_speed_reference(self.wind_speed_reference)
+        expected_reference = (
+            WIND_SPEED_REFERENCE_BY_SOURCE[source]
+            if isinstance(source, TrackSource)
+            else None
+        )
+        if expected_reference is not None:
+            if reference is not None and reference != expected_reference:
+                raise ValueError(
+                    f"{source.value} tracks require {expected_reference.value} wind speeds"
+                )
+            reference = expected_reference
+        expected_is_synthetic = (
+            IS_SYNTHETIC_BY_SOURCE[source]
+            if isinstance(source, TrackSource)
+            else None
+        )
+        is_synthetic = self.is_synthetic
+        if expected_is_synthetic is not None:
+            if is_synthetic is not None and is_synthetic != expected_is_synthetic:
+                raise ValueError(
+                    f"{source.value} tracks require is_synthetic={expected_is_synthetic}"
+                )
+            is_synthetic = expected_is_synthetic
+        elif not isinstance(is_synthetic, bool):
+            raise ValueError(
+                "Custom or unspecified sources require an explicit boolean is_synthetic"
+            )
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "wind_speed_reference", reference)
+        object.__setattr__(self, "is_synthetic", is_synthetic)
 
     def __repr__(self) -> str:
         """Return a compact catalogue summary suitable for interactive use."""
@@ -55,6 +99,7 @@ class TrackSet:
         return (
             "TrackSet(\n"
             f"  metadata={metadata_repr},\n"
+            f"  is_synthetic={self.is_synthetic},\n"
             f"  storms={n_storms},\n"
             f"  observations={n_observations},\n"
             f"  years={year_range},\n"
@@ -63,7 +108,13 @@ class TrackSet:
 
     @classmethod
     def read_parquet(
-        cls, path: str | Path, *, metadata: dict[str, Any] | None = None
+        cls,
+        path: str | Path,
+        *,
+        metadata: dict[str, Any] | None = None,
+        source: TrackSource | str | None = None,
+        wind_speed_reference: WindSpeedReference | str | None = None,
+        is_synthetic: bool | None = None,
     ) -> "TrackSet":
         """Read and validate a processed Parquet or GeoParquet track table.
 
@@ -79,12 +130,44 @@ class TrackSet:
             and b"geo" in parquet_metadata
         )
         tracks = gpd.read_parquet(path) if is_geoparquet else pd.read_parquet(path)
-        return cls(tracks, {} if metadata is None else dict(metadata))
+        return cls(
+            tracks,
+            {} if metadata is None else dict(metadata),
+            source=source,
+            wind_speed_reference=wind_speed_reference,
+            is_synthetic=is_synthetic,
+        )
 
     def with_metadata(self, **metadata: Any) -> "TrackSet":
         """Return a new track set with added or replaced catalogue metadata."""
 
-        return TrackSet(self.tracks, {**self.metadata, **metadata})
+        return self._with_tracks(self.tracks, metadata={**self.metadata, **metadata})
+
+    @property
+    def model_family(self) -> str | None:
+        """Return the source-model family used for footprint provenance."""
+
+        if self.source is None:
+            return None
+        return self.source.value if isinstance(self.source, TrackSource) else self.source
+
+    def require_wind_speed_reference(self) -> WindSpeedReference:
+        """Return the resolved input convention needed for wind generation."""
+
+        if self.wind_speed_reference is None:
+            raise ValueError(
+                "Wind generation requires a known source or an explicit wind_speed_reference"
+            )
+        return self.wind_speed_reference
+
+    @property
+    def footprint_metadata(self) -> dict[str, Any]:
+        """Return provenance metadata for generated earth-relative footprints."""
+
+        metadata = {**self.metadata, "is_synthetic": self.is_synthetic}
+        if self.model_family is not None:
+            metadata["model_family"] = self.model_family
+        return metadata
 
     @property
     def track_ids(self) -> pd.Index:
@@ -97,6 +180,40 @@ class TrackSet:
         if track.empty:
             raise KeyError(f"Unknown track_id: {track_id}")
         return track.reset_index(drop=True)
+
+    def filter_first_tracks(self, n: int) -> "TrackSet":
+        """Keep the first ``n`` tracks in canonical track-ID order."""
+
+        _validate_positive_count(n)
+        track_ids = self.track_ids[:n]
+        tracks = self.tracks.loc[self.tracks["track_id"].isin(track_ids)].copy()
+        return self._with_tracks(tracks)
+
+    def filter_first_years(self, n: int) -> "TrackSet":
+        """Keep observations from the first ``n`` calendar years."""
+
+        _validate_positive_count(n)
+        years = np.sort(self.tracks["year"].unique())[:n]
+        tracks = self.tracks.loc[self.tracks["year"].isin(years)].copy()
+        return self._with_tracks(tracks)
+
+    def filter_by_minimum_max_wind_speed(
+        self, minimum_max_wind_speed_ms: float
+    ) -> "TrackSet":
+        """Keep complete tracks whose peak wind meets a minimum in m/s."""
+
+        if not np.isfinite(minimum_max_wind_speed_ms) or minimum_max_wind_speed_ms < 0:
+            raise ValueError("Minimum_max_wind_speed_ms must be finite and non-negative")
+        peak_wind_speed = self.tracks.groupby("track_id", sort=False)[
+            "max_wind_speed_ms"
+        ].max()
+        qualifying_track_ids = peak_wind_speed.index[
+            peak_wind_speed >= minimum_max_wind_speed_ms
+        ]
+        tracks = self.tracks.loc[
+            self.tracks["track_id"].isin(qualifying_track_ids)
+        ].copy()
+        return self._with_tracks(tracks)
 
     def filter_by_bbox(
         self,
@@ -138,11 +255,49 @@ class TrackSet:
             if len(positions):
                 slices.append(track.iloc[positions[0] : positions[-1] + 1])
         if not slices:
-            return TrackSet(self.tracks.iloc[0:0].copy(), self.metadata)
-        return TrackSet(pd.concat(slices, ignore_index=True), self.metadata)
+            return self._with_tracks(self.tracks.iloc[0:0].copy())
+        return self._with_tracks(pd.concat(slices, ignore_index=True))
 
     def iter_tracks(self) -> Iterator[tuple[str, gpd.GeoDataFrame]]:
         """Yield ``(track_id, track)`` pairs in stable catalogue order."""
 
         for track_id, track in self.tracks.groupby("track_id", sort=False):
             yield track_id, track.reset_index(drop=True)
+
+    def _with_tracks(
+        self, tracks: pd.DataFrame, *, metadata: dict[str, Any] | None = None
+    ) -> "TrackSet":
+        return TrackSet(
+            tracks,
+            self.metadata if metadata is None else metadata,
+            source=self.source,
+            wind_speed_reference=self.wind_speed_reference,
+            is_synthetic=self.is_synthetic,
+        )
+
+
+def _normalise_source(source: TrackSource | str | None) -> TrackSource | str | None:
+    if source is None or isinstance(source, TrackSource):
+        return source
+    try:
+        return TrackSource(source.lower())
+    except ValueError:
+        return source
+
+
+def _validate_positive_count(n: int) -> None:
+    if isinstance(n, bool) or not isinstance(n, Integral):
+        raise TypeError("n must be an integer")
+    if n <= 0:
+        raise ValueError("n must be positive")
+
+
+def _normalise_wind_speed_reference(
+    reference: WindSpeedReference | str | None,
+) -> WindSpeedReference | None:
+    if reference is None or isinstance(reference, WindSpeedReference):
+        return reference
+    try:
+        return WindSpeedReference(reference.lower())
+    except ValueError as error:
+        raise ValueError(f"Unknown wind_speed_reference: {reference!r}") from error
