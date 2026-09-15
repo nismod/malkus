@@ -41,9 +41,15 @@ if __name__ == "__main__":
     logging.info("Processing tracks to return period hazard maps")
     t0 = datetime.now()
 
-    bbox = (56.2, -21.8, 59.1, -18.9)  # Mauritius
+    # bbox = (56.2, -21.8, 59.1, -18.9)  # Mauritius
+    # name = "mur"
+    bbox = (-61.96, 13.17, -59.90, 14.63)  # St. Lucia
+    name = "lca"
+    # bbox = (-66.12, 9.69, -58.44, 19.46)  # Lesser Antilles
+    # name = "lesser-antilles"
+
     interpolation_frequency = "30min"
-    grid_resolution = 0.1
+    grid_resolution = 0.05
 
     input_dir = Path("data/in/")
 
@@ -57,7 +63,7 @@ if __name__ == "__main__":
 
     source = TrackSource.CHAZ
     tracks_path = input_dir / "tracks/CHAZ_SSP-585_GCM-CESM2_epoch-2010/tracks.geoparquet"
-    gcm = "CESM2"
+    gcm = "UKESM1-0-LL"
     scenario = "SSP585"
     epoch = 2010
     n_years = 1000
@@ -67,11 +73,11 @@ if __name__ == "__main__":
     mapping_path = input_dir / "land_cover/land_cover_to_surface_roughness.csv"
 
     out_dir = Path("data/out/")
-    interpolated_tracks_path = out_dir / f"tracks/{source}_{scenario}_{gcm}_{epoch}.pq"
-    storm_qc_path = out_dir / f"tracks/{source}_{scenario}_{gcm}_{epoch}_qc.pq"
-    surface_footprints_path = out_dir / f"wind_fields/{source}_{scenario}_{gcm}_{epoch}.zarr"
-    rp_maps_zarr_path = out_dir / f"hazard_maps/{source}_{scenario}_{gcm}_{epoch}.zarr"
-    rp_maps_tiff_path = out_dir / f"hazard_maps/{source}_{scenario}_{gcm}_{epoch}"
+    interpolated_tracks_path = out_dir / f"tracks/{name}_{source}_{scenario}_{gcm}_{epoch}.pq"
+    storm_qc_path = out_dir / f"tracks/{name}_{source}_{scenario}_{gcm}_{epoch}_qc.pq"
+    surface_footprints_path = out_dir / f"wind_fields/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
+    rp_maps_zarr_path = out_dir / f"hazard_maps/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
+    rp_maps_tiff_path = out_dir / f"hazard_maps/{name}_{source}_{scenario}_{gcm}_{epoch}"
 
     grid = RegularGrid.from_bbox(bbox, grid_resolution)
     logging.info(grid)
