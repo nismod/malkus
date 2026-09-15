@@ -94,9 +94,11 @@ if __name__ == "__main__":
     logging.info(trackset)
     logging.info("Filtering trackset")
     trackset = trackset.filter_by_minimum_max_wind_speed(15.0)
+    logging.info(f"tracks={len(trackset.track_ids)}, observations={len(trackset.tracks)}")
     trackset = trackset.filter_by_bbox(bbox, search_radius_deg=3)
+    logging.info(f"tracks={len(trackset.track_ids)}, observations={len(trackset.tracks)}")
     trackset = trackset.filter_first_years(n_years)
-    logging.info(trackset)
+    logging.info(f"tracks={len(trackset.track_ids)}, observations={len(trackset.tracks)}")
 
     logging.info("Compute gradient winds")
     gradient_footprints: WindFootprintSet = compute_gradient_winds(
