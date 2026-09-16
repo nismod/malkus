@@ -1,4 +1,14 @@
-"""Animate cumulative return-period maps from a wind-footprint Zarr store."""
+"""
+Animate cumulative return-period maps from a wind-footprint Zarr store.
+
+Example usage:
+$ pixi run python scripts/plot_rp_map_accumulation.py \
+    data/out/wind_fields/lesser-antilles_chaz_SSP585_UKESM1-0-LL_2010.zarr/ \
+    lesser-antilles.mp4 \
+    --return-periods 5 10 20 50 100 200 \
+    --max-cpus 56 \
+    --max-years 1000
+"""
 
 
 from __future__ import annotations
@@ -21,9 +31,10 @@ from PIL import Image
 from malkus import WindFootprintSet
 from malkus.hazard.footprint import WIND_VARIABLE
 
-plt.style.use("dark_background")
-CMAP = "magma"
-CMAP_UNDER = "black"
+
+CMAP = "magma_r"
+CMAP_UNDER = "white"
+CMAP_INTERVAL = 3
 
 _WORKER_DATA = None
 _WORKER_YEARS = None
@@ -108,8 +119,7 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
         raise RuntimeError("Frame worker was not initialized")
 
     current, maps = _cumulative_maps_lazy(year, periods)
-    interval = 3.0
-    levels = np.arange(vmin, vmax + interval, interval)
+    levels = np.arange(vmin, vmax + CMAP_INTERVAL, CMAP_INTERVAL)
     cmap = plt.get_cmap(CMAP, len(levels) - 1).copy()
     cmap.set_under(CMAP_UNDER)
     norm = BoundaryNorm(levels, cmap.N, clip=False)
@@ -117,14 +127,15 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
     n_panels = len(periods) + 1
     rows, columns = _subplot_layout(n_panels)
 
-    fig, axes = plt.subplots(rows, columns, squeeze=False, figsize=(5 * columns, 4 * rows))
+    fig, axes = plt.subplots(rows, columns, squeeze=False, figsize=(5 * columns, 3.5 * rows))
     axes_flat = axes.ravel()
     extent = [float(_WORKER_LONS.min()), float(_WORKER_LONS.max()),
               float(_WORKER_LATS.min()), float(_WORKER_LATS.max())]
     values = [current, *maps]
-    images = [ax.imshow(value, origin="lower", extent=extent, cmap=cmap,
-                        norm=norm)
-              for ax, value in zip(axes_flat, values)]
+    images = [
+        ax.imshow(value, origin="lower", extent=extent, cmap=cmap, norm=norm)
+        for ax, value in zip(axes_flat, values)
+    ]
     axes_flat[0].set_title("Annual maximum")
     for ax, period in zip(axes_flat[1:], periods):
         ax.set_title(f"{period:g}-year RP")
@@ -152,13 +163,47 @@ def main() -> None:
     logging.info("Creating cumulative return-period map animation")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path)
-    parser.add_argument("output", type=Path)
-    parser.add_argument("--return-periods", nargs="+", type=float, required=True)
-    parser.add_argument("--vmin", type=float, default=18)
-    parser.add_argument("--vmax", type=float, default=72)
-    parser.add_argument("--max-years", type=int, default=None)
-    parser.add_argument("--max-cpus", type=int, default=1)
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="Input surface-wind footprint Zarr store (.zarr)",
+    )
+    parser.add_argument(
+        "output",
+        type=Path,
+        help="Output H.264 MP4 animation file (.mp4)",
+    )
+    parser.add_argument(
+        "--return-periods",
+        nargs="+",
+        type=float,
+        required=True,
+        help="Return periods in years to plot (for example: 5 10 20 50)",
+    )
+    parser.add_argument(
+        "--vmin",
+        type=float,
+        default=18,
+        help="Lower wind-speed colour limit in m/s (default: 18)",
+    )
+    parser.add_argument(
+        "--vmax",
+        type=float,
+        default=72,
+        help="Upper wind-speed colour limit in m/s (default: 72)",
+    )
+    parser.add_argument(
+        "--max-years",
+        type=int,
+        default=None,
+        help="Maximum number of calendar years to animate from the first year",
+    )
+    parser.add_argument(
+        "--max-cpus",
+        type=int,
+        default=1,
+        help="Maximum number of worker processes for frame rendering (default: 1)",
+    )
     args = parser.parse_args()
 
     if (
@@ -186,7 +231,6 @@ def main() -> None:
     worker_count = min(args.max_cpus, frame_count)
 
     with tempfile.TemporaryDirectory(prefix="malkus-rp-frames-") as temp_dir:
-        logging.info("Calculating and rendering frames")
         paths: list[str | None] = [None] * frame_count
         with ProcessPoolExecutor(
             max_workers=worker_count,
@@ -207,12 +251,11 @@ def main() -> None:
                     args.vmax
                 ) for i, year in enumerate(frame_years)
             ]
-            for completed, future in enumerate(as_completed(futures), start=1):
-                index, path = future.result()
-                paths[index] = path
-                _progress(completed, frame_count)
-
-        print(file=sys.stderr)
+            with tqdm(total=frame_count, desc="Rendering frames") as progress:
+                for future in as_completed(futures):
+                    index, path = future.result()
+                    paths[index] = path
+                    progress.update(1)
         ordered_paths = [path for path in paths if path is not None]
         if len(ordered_paths) != frame_count:
             raise RuntimeError("Not all animation frames were rendered")
