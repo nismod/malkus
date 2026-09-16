@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 from pathlib import Path
 from textwrap import indent
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 import numpy as np
 import pandas as pd
@@ -24,6 +26,73 @@ from malkus.wind.profiles import WindProfile, holland_1980
 
 WIND_LEVELS = frozenset({"gradient", "surface"})
 WIND_VARIABLE = "max_wind_speed_ms"
+
+
+def _evaluate_event_batch(
+    batch: list[tuple[str, pd.DataFrame]],
+    grid: RegularGrid,
+    profile: WindProfile,
+    evaluation_radius_m: float,
+    wind_speed_reference: WindSpeedReference,
+) -> list[tuple[str, np.ndarray]]:
+    return [
+        (
+            event_id,
+            _evaluate_prepared_event_footprint(
+                track,
+                grid,
+                profile=profile,
+                evaluation_radius_m=evaluation_radius_m,
+                wind_speed_reference=wind_speed_reference,
+            ),
+        )
+        for event_id, track in batch
+    ]
+
+
+def _event_batches(
+    events: list[tuple[str, pd.DataFrame]], batch_size: int
+) -> Iterator[list[tuple[str, pd.DataFrame]]]:
+    for start in range(0, len(events), batch_size):
+        yield events[start : start + batch_size]
+
+
+def _iter_event_footprints(
+    prepared_tracks: list[tuple[str, pd.DataFrame]],
+    grid: RegularGrid,
+    profile: WindProfile,
+    evaluation_radius_m: float,
+    wind_speed_reference: WindSpeedReference,
+    *,
+    n_workers: int,
+    batch_size: int,
+) -> Iterator[tuple[str, np.ndarray]]:
+    batches = _event_batches(prepared_tracks, batch_size)
+    if n_workers == 1:
+        for batch in batches:
+            yield from _evaluate_event_batch(
+                batch, grid, profile, evaluation_radius_m, wind_speed_reference
+            )
+        return
+
+    context = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=context) as executor:
+        for result_batch in executor.map(
+            _evaluate_event_batch,
+            batches,
+            (grid for _ in range((len(prepared_tracks) + batch_size - 1) // batch_size)),
+            (profile for _ in range((len(prepared_tracks) + batch_size - 1) // batch_size)),
+            (evaluation_radius_m for _ in range((len(prepared_tracks) + batch_size - 1) // batch_size)),
+            (wind_speed_reference for _ in range((len(prepared_tracks) + batch_size - 1) // batch_size)),
+        ):
+            yield from result_batch
+
+
+def _validate_parallel_options(n_workers: int, batch_size: int) -> None:
+    if isinstance(n_workers, bool) or not isinstance(n_workers, int) or n_workers < 1:
+        raise ValueError("n_workers must be a positive integer")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+        raise ValueError("batch_size must be a positive integer")
 
 
 @dataclass(frozen=True)
@@ -163,6 +232,8 @@ def compute_gradient_winds(
     evaluation_radius_m: float = 1_000_000,
     interpolated_tracks_path: str | Path | None = None,
     storm_qc_path: str | Path | None = None,
+    n_workers: int = 1,
+    batch_size: int = 32,
 ) -> WindFootprintSet:
     """Compute maximum gradient-wind footprints for every track in a TrackSet.
 
@@ -171,6 +242,7 @@ def compute_gradient_winds(
     This makes independent external event partitions safe to calculate.
     """
 
+    _validate_parallel_options(n_workers, batch_size)
     wind_speed_reference = trackset.require_wind_speed_reference()
     prepared_tracks = [
         (
@@ -192,16 +264,10 @@ def compute_gradient_winds(
 
     if output is None:
         event_ids, years = _event_metadata(trackset)
-        fields = [
-            _evaluate_prepared_event_footprint(
-                track,
-                grid,
-                profile=profile,
-                evaluation_radius_m=evaluation_radius_m,
-                wind_speed_reference=wind_speed_reference,
-            )
-            for _, track in prepared_tracks
-        ]
+        fields = [footprint for _, footprint in _iter_event_footprints(
+            prepared_tracks, grid, profile, evaluation_radius_m,
+            wind_speed_reference, n_workers=n_workers, batch_size=batch_size,
+        )]
         array = (
             np.stack(fields).astype(np.float32, copy=False)
             if fields
@@ -239,15 +305,11 @@ def compute_gradient_winds(
         interpolation_frequency=interpolation_frequency,
         evaluation_radius_m=evaluation_radius_m,
     )
-    for event_id, track in prepared_tracks:
+    for event_id, footprint in _iter_event_footprints(
+        prepared_tracks, grid, profile, evaluation_radius_m,
+        wind_speed_reference, n_workers=n_workers, batch_size=batch_size,
+    ):
         event_index = event_indices[event_id]
-        footprint = _evaluate_prepared_event_footprint(
-            track,
-            grid,
-            profile=profile,
-            evaluation_radius_m=evaluation_radius_m,
-            wind_speed_reference=wind_speed_reference,
-        )
         root[WIND_VARIABLE][event_index] = footprint
         root["computed"][event_index] = True
     return output

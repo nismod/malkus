@@ -43,11 +43,12 @@ if __name__ == "__main__":
 
     # bbox = (56.2, -21.8, 59.1, -18.9)  # Mauritius
     # name = "mur"
-    bbox = (-61.96, 13.17, -59.90, 14.63)  # St. Lucia
-    name = "lca"
-    # bbox = (-66.12, 9.69, -58.44, 19.46)  # Lesser Antilles
-    # name = "lesser-antilles"
+    # bbox = (-61.96, 13.17, -59.90, 14.63)  # St. Lucia
+    # name = "lca"
+    bbox = (-66.12, 9.69, -58.44, 19.46)  # Lesser Antilles
+    name = "lesser-antilles"
 
+    n_cpu = 48
     interpolation_frequency = "30min"
     grid_resolution = 0.05
 
@@ -102,6 +103,7 @@ if __name__ == "__main__":
         interpolation_frequency=interpolation_frequency,
         interpolated_tracks_path=interpolated_tracks_path,
         storm_qc_path=storm_qc_path,
+        n_workers=n_cpu,
     )
 
     logging.info("Initialize footprint store")
