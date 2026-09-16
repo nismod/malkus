@@ -81,15 +81,30 @@ def _gif_palette() -> Image.Image:
     return palette
 
 
+def _subplot_layout(n_panels: int) -> tuple[int, int]:
+    """Return the preferred (rows, columns) layout for ``n_panels``."""
+    preferred = {
+        1: (2, 1), 2: (2, 2), 3: (2, 3), 4: (2, 4),
+        5: (3, 3), 6: (3, 4), 7: (4, 4),
+    }
+    if n_panels in preferred:
+        return preferred[n_panels]
+    if n_panels <= 16:
+        return 4, 4
+    side = int(np.ceil(np.sqrt(n_panels)))
+    return side, side
+
+
 def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
     if _WORKER_LATS is None or _WORKER_LONS is None:
         raise RuntimeError("Frame worker was not initialized")
+
     current, maps = _cumulative_maps_lazy(year, periods)
     cmap = plt.get_cmap("magma_r").copy()
     cmap.set_under("white")
+
     n_panels = len(periods) + 1
-    columns = min(3, n_panels)
-    rows = int(np.ceil(n_panels / columns))
+    rows, columns = _subplot_layout(n_panels)
 
     fig, axes = plt.subplots(rows, columns, squeeze=False, figsize=(5 * columns, 4 * rows))
     axes_flat = axes.ravel()
