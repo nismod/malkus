@@ -33,6 +33,7 @@ class TrackSet:
     source: TrackSource | str | None = None
     wind_speed_reference: WindSpeedReference | str | None = None
     is_synthetic: bool | None = None
+    aoi: tuple[float, float, float, float] | None = None
 
     def __post_init__(self) -> None:
         if "is_synthetic" in self.metadata:
@@ -100,6 +101,7 @@ class TrackSet:
             "TrackSet(\n"
             f"  metadata={metadata_repr},\n"
             f"  is_synthetic={self.is_synthetic},\n"
+            f"  aoi={self.aoi},\n"
             f"  storms={n_storms},\n"
             f"  observations={n_observations},\n"
             f"  years={year_range},\n"
@@ -137,6 +139,7 @@ class TrackSet:
 
         frames: list[pd.DataFrame] = []
         seen_years: set[Any] = set()
+        seen_event_ids: set[Any] = set()
         for input_path in paths:
             parquet_file = pq.ParquetFile(input_path)
             parquet_metadata = parquet_file.metadata.metadata or {}
@@ -157,6 +160,14 @@ class TrackSet:
                     f"{sorted(collisions)[:5]}"
                 )
             seen_years.update(years)
+            event_ids = set(raw_tracks["track_id"].dropna().unique().tolist())
+            event_collisions = seen_event_ids.intersection(event_ids)
+            if event_collisions:
+                raise ValueError(
+                    "Input files contain colliding event IDs: "
+                    f"{sorted(event_collisions)[:5]}"
+                )
+            seen_event_ids.update(event_ids)
 
             file_trackset = cls(
                 raw_tracks,
@@ -164,6 +175,7 @@ class TrackSet:
                 source=source,
                 wind_speed_reference=wind_speed_reference,
                 is_synthetic=is_synthetic,
+                aoi=bbox,
             )
             if bbox is not None:
                 file_trackset = file_trackset.filter_by_bbox(
@@ -182,6 +194,7 @@ class TrackSet:
             source=source,
             wind_speed_reference=wind_speed_reference,
             is_synthetic=is_synthetic,
+            aoi=bbox,
         )
         if n_years is not None:
             result = result.filter_first_years(n_years)
@@ -321,6 +334,7 @@ class TrackSet:
             source=self.source,
             wind_speed_reference=self.wind_speed_reference,
             is_synthetic=self.is_synthetic,
+            aoi=self.aoi,
         )
 
 
