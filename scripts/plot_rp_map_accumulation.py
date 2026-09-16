@@ -14,12 +14,16 @@ import tempfile
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from matplotlib.colors import BoundaryNorm
 import numpy as np
 from PIL import Image
 
 from malkus import WindFootprintSet
 from malkus.hazard.footprint import WIND_VARIABLE
+
+plt.style.use("dark_background")
+CMAP = "magma"
+CMAP_UNDER = "black"
 
 _WORKER_DATA = None
 _WORKER_YEARS = None
@@ -66,18 +70,22 @@ def _cumulative_maps_lazy(frame_year: int, periods: np.ndarray):
     return current, result
 
 
-def _gif_palette() -> Image.Image:
+def _gif_palette(vmin: float, vmax: float) -> Image.Image:
     """Return one fixed palette shared by every GIF frame."""
-    cmap = plt.get_cmap("magma_r", 240)
-    map_colours = (cmap(np.linspace(0, 1, 240))[:, :3] * 255).round().astype(np.uint8)
+    interval = 3.0
+    n_levels = int(round((vmax - vmin) / interval))
+    cmap = plt.get_cmap(CMAP, n_levels)
+    map_colours = (cmap(np.linspace(0, 1, n_levels))[:, :3] * 255).round().astype(np.uint8)
     ui_colours = np.array([
         (255, 255, 255), (0, 0, 0), (32, 32, 32), (64, 64, 64),
         (96, 96, 96), (128, 128, 128), (160, 160, 160), (192, 192, 192),
         (224, 224, 224), (240, 240, 240), (255, 0, 0), (0, 0, 255),
         (0, 128, 0), (255, 255, 0), (255, 0, 255), (0, 255, 255),
     ], dtype=np.uint8)
+    colours = np.concatenate((map_colours, ui_colours))
+    colours = np.vstack((colours, np.resize(ui_colours, (256 - len(colours), 3))))
     palette = Image.new("P", (256, 1))
-    palette.putpalette(np.concatenate((map_colours, ui_colours)).ravel().tolist())
+    palette.putpalette(colours.ravel().tolist())
     return palette
 
 
@@ -100,8 +108,11 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
         raise RuntimeError("Frame worker was not initialized")
 
     current, maps = _cumulative_maps_lazy(year, periods)
-    cmap = plt.get_cmap("magma_r").copy()
-    cmap.set_under("white")
+    interval = 3.0
+    levels = np.arange(vmin, vmax + interval, interval)
+    cmap = plt.get_cmap(CMAP, len(levels) - 1).copy()
+    cmap.set_under(CMAP_UNDER)
+    norm = BoundaryNorm(levels, cmap.N, clip=False)
 
     n_panels = len(periods) + 1
     rows, columns = _subplot_layout(n_panels)
@@ -112,7 +123,7 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
               float(_WORKER_LATS.min()), float(_WORKER_LATS.max())]
     values = [current, *maps]
     images = [ax.imshow(value, origin="lower", extent=extent, cmap=cmap,
-                        norm=Normalize(vmin=vmin, vmax=vmax))
+                        norm=norm)
               for ax, value in zip(axes_flat, values)]
     axes_flat[0].set_title("Annual maximum")
     for ax, period in zip(axes_flat[1:], periods):
@@ -144,8 +155,8 @@ def main() -> None:
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--return-periods", nargs="+", type=float, required=True)
-    parser.add_argument("--vmin", type=float, default=20)
-    parser.add_argument("--vmax", type=float, default=70)
+    parser.add_argument("--vmin", type=float, default=18)
+    parser.add_argument("--vmax", type=float, default=72)
     parser.add_argument("--max-years", type=int, default=None)
     parser.add_argument("--max-cpus", type=int, default=1)
     args = parser.parse_args()
@@ -205,7 +216,7 @@ def main() -> None:
         ordered_paths = [path for path in paths if path is not None]
         if len(ordered_paths) != frame_count:
             raise RuntimeError("Not all animation frames were rendered")
-        palette = _gif_palette()
+        palette = _gif_palette(args.vmin, args.vmax)
         images = [
             Image.open(path).convert("RGB").quantize(
                 palette=palette, dither=Image.Dither.FLOYDSTEINBERG
