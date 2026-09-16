@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from numbers import Integral
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 import numpy as np
 import pandas as pd
@@ -109,34 +109,83 @@ class TrackSet:
     @classmethod
     def read_parquet(
         cls,
-        path: str | Path,
+        path: str | Path | Sequence[str | Path],
         *,
         metadata: dict[str, Any] | None = None,
         source: TrackSource | str | None = None,
         wind_speed_reference: WindSpeedReference | str | None = None,
         is_synthetic: bool | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        search_radius_deg: float | None = None,
+        minimum_max_wind_speed_ms: float | None = None,
+        n_years: int | None = None,
     ) -> "TrackSet":
-        """Read and validate a processed Parquet or GeoParquet track table.
+        """Read and filter one or more processed track tables.
 
-        The Parquet footer identifies GeoParquet files without reading their
-        rows. GeoPandas decodes GeoParquet WKB geometry and retains its CRS;
-        ordinary Parquet files continue through the pandas path.
+        Files are read completely one at a time. When filters are supplied,
+        bbox filtering is applied first, followed by peak-wind filtering;
+        ``n_years`` is applied after the filtered files are concatenated.
         """
+        if bbox is None and search_radius_deg is not None:
+            raise ValueError("search_radius_deg requires bbox")
+        if bbox is not None and search_radius_deg is None:
+            raise ValueError("bbox requires search_radius_deg")
 
-        parquet_file = pq.ParquetFile(path)
-        parquet_metadata = parquet_file.metadata.metadata or {}
-        is_geoparquet = (
-            "geometry" in parquet_file.schema_arrow.names
-            and b"geo" in parquet_metadata
-        )
-        tracks = gpd.read_parquet(path) if is_geoparquet else pd.read_parquet(path)
-        return cls(
+        paths = [path] if isinstance(path, (str, Path)) else list(path)
+        if not paths:
+            raise ValueError("path must contain at least one path")
+
+        frames: list[pd.DataFrame] = []
+        seen_years: set[Any] = set()
+        for input_path in paths:
+            parquet_file = pq.ParquetFile(input_path)
+            parquet_metadata = parquet_file.metadata.metadata or {}
+            is_geoparquet = (
+                "geometry" in parquet_file.schema_arrow.names
+                and b"geo" in parquet_metadata
+            )
+            raw_tracks = (
+                gpd.read_parquet(input_path)
+                if is_geoparquet
+                else pd.read_parquet(input_path)
+            )
+            years = set(raw_tracks["year"].dropna().unique().tolist())
+            collisions = seen_years.intersection(years)
+            if collisions:
+                raise ValueError(
+                    "Input files contain colliding years: "
+                    f"{sorted(collisions)[:5]}"
+                )
+            seen_years.update(years)
+
+            file_trackset = cls(
+                raw_tracks,
+                {} if metadata is None else dict(metadata),
+                source=source,
+                wind_speed_reference=wind_speed_reference,
+                is_synthetic=is_synthetic,
+            )
+            if bbox is not None:
+                file_trackset = file_trackset.filter_by_bbox(
+                    bbox, search_radius_deg=search_radius_deg
+                )
+            if minimum_max_wind_speed_ms is not None:
+                file_trackset = file_trackset.filter_by_minimum_max_wind_speed(
+                    minimum_max_wind_speed_ms
+                )
+            frames.append(file_trackset.tracks)
+
+        tracks = pd.concat(frames, ignore_index=True)
+        result = cls(
             tracks,
             {} if metadata is None else dict(metadata),
             source=source,
             wind_speed_reference=wind_speed_reference,
             is_synthetic=is_synthetic,
         )
+        if n_years is not None:
+            result = result.filter_first_years(n_years)
+        return result
 
     def with_metadata(self, **metadata: Any) -> "TrackSet":
         """Return a new track set with added or replaced catalogue metadata."""
@@ -190,11 +239,10 @@ class TrackSet:
         return self._with_tracks(tracks)
 
     def filter_first_years(self, n: int) -> "TrackSet":
-        """Keep observations from the first ``n`` calendar years."""
+        """Keep observations with a calendar year less than ``n``."""
 
         _validate_positive_count(n)
-        years = np.sort(self.tracks["year"].unique())[:n]
-        tracks = self.tracks.loc[self.tracks["year"].isin(years)].copy()
+        tracks = self.tracks.loc[self.tracks["year"] < n].copy()
         return self._with_tracks(tracks)
 
     def filter_by_minimum_max_wind_speed(

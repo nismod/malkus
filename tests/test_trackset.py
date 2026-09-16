@@ -88,12 +88,12 @@ def test_trackset_filters_observations_from_first_calendar_years(
         ignore_index=True,
     )
     trackset = TrackSet(frame, metadata={"source": "test"}, is_synthetic=True)
-    selected = trackset.filter_first_years(2)
+    selected = trackset.filter_first_years(2002)
     assert selected.tracks["year"].unique().tolist() == [2000, 2001]
     assert selected.track_ids.tolist() == ["storm-2000", "storm-2001"]
     assert selected.metadata == {"source": "test"}
     assert selected.is_synthetic
-    assert len(trackset.filter_first_years(10).track_ids) == 3
+    assert len(trackset.filter_first_years(2010).track_ids) == 3
     with pytest.raises(ValueError, match="positive"):
         trackset.filter_first_years(0)
     with pytest.raises(TypeError, match="integer"):

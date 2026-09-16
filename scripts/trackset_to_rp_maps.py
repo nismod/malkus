@@ -54,7 +54,7 @@ if __name__ == "__main__":
     input_dir = Path("data/in/")
 
 #   source = TrackSource.EMANUEL
-#   tracks_path = input_dir / "tracks/emanuel_ssp-585_gcm-cesm2_epoch-2005/tracks.geoparquet"
+#   tracks_paths = input_dir / "tracks/emanuel_ssp-585_gcm-cesm2_epoch-2005/tracks.geoparquet"
 #   scenario = "585"
 #   gcm = "cesm2"
 #   epoch = 2005
@@ -62,12 +62,12 @@ if __name__ == "__main__":
 #   return_periods = [1, 2, 5, 10, 20]
 
     source = TrackSource.CHAZ
-    tracks_path = input_dir / "tracks/CHAZ_SSP-585_GCM-CESM2_epoch-2010/tracks.geoparquet"
+    # tracks_path = input_dir / "tracks/CHAZ_SSP-585_GCM-CESM2_epoch-2010/tracks.geoparquet"
+    tracks_paths = [input_dir / f"tracks/CHAZ_SSP-585_GCM-UKESM1-0-LL_epoch-2010/{i}/tracks.geoparquet" for i in range(5)]
     gcm = "UKESM1-0-LL"
     scenario = "SSP585"
     epoch = 2010
-    n_years = 1000
-    return_periods = [1, 2, 5, 10, 20, 50, 100]
+    return_periods = [5, 10, 20, 50, 100, 200, 500]
 
     land_cover_path = input_dir / "land_cover/glob_cover_2009/GLOBCOVER_L4_200901_200912_V2.3.tif"
     mapping_path = input_dir / "land_cover/land_cover_to_surface_roughness.csv"
@@ -83,22 +83,17 @@ if __name__ == "__main__":
     logging.info(grid)
 
     trackset = TrackSet.read_parquet(
-        tracks_path,
+        tracks_paths,
         metadata={
             "scenario": scenario,
             "gcm": gcm,
             "epoch": epoch,
         },
         source=source,
+        bbox=bbox,
+        search_radius_deg=3,
     )
     logging.info(trackset)
-    logging.info("Filtering trackset")
-    trackset = trackset.filter_by_minimum_max_wind_speed(15.0)
-    logging.info(f"tracks={len(trackset.track_ids)}, observations={len(trackset.tracks)}")
-    trackset = trackset.filter_by_bbox(bbox, search_radius_deg=3)
-    logging.info(f"tracks={len(trackset.track_ids)}, observations={len(trackset.tracks)}")
-    trackset = trackset.filter_first_years(n_years)
-    logging.info(f"tracks={len(trackset.track_ids)}, observations={len(trackset.tracks)}")
 
     logging.info("Compute gradient winds")
     gradient_footprints: WindFootprintSet = compute_gradient_winds(
