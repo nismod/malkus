@@ -9,3 +9,5 @@ data/
 
 .pixi/*
 !.pixi/config.toml
+
+*.gif

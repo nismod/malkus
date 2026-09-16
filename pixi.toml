@@ -19,6 +19,7 @@ zarr = ">=2.18,<3"
 rasterio = "*"
 rioxarray = "*"
 scipy = "*"
+matplotlib = "*"
 pytest = "*"
 jupyter = ">=1.1.1,<2"
 
