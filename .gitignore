@@ -11,3 +11,4 @@ data/
 !.pixi/config.toml
 
 *.gif
+*.mp4

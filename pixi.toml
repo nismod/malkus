@@ -20,6 +20,7 @@ rasterio = "*"
 rioxarray = "*"
 scipy = "*"
 matplotlib = "*"
+tqdm = "*"
 pytest = "*"
 jupyter = ">=1.1.1,<2"
 

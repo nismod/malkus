@@ -16,4 +16,5 @@ dependencies = [
     "rasterio",
     "rioxarray",
     "matplotlib",
+    "tqdm",
 ]

@@ -4,7 +4,7 @@ Animate cumulative return-period maps from a wind-footprint Zarr store.
 Example usage:
 $ pixi run python scripts/plot_rp_map_accumulation.py \
     data/out/wind_fields/lesser-antilles_chaz_SSP585_UKESM1-0-LL_2010.zarr/ \
-    lesser-antilles.mp4 \
+    lesser-antilles.gif \
     --return-periods 5 10 20 50 100 200 \
     --max-cpus 56 \
     --max-years 1000
@@ -18,7 +18,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
 import multiprocessing as mp
 from pathlib import Path
-import sys
 import tempfile
 
 import matplotlib
@@ -27,6 +26,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 
 from malkus import WindFootprintSet
 from malkus.hazard.footprint import WIND_VARIABLE
@@ -81,25 +81,6 @@ def _cumulative_maps_lazy(frame_year: int, periods: np.ndarray):
     return current, result
 
 
-def _gif_palette(vmin: float, vmax: float) -> Image.Image:
-    """Return one fixed palette shared by every GIF frame."""
-    interval = 3.0
-    n_levels = int(round((vmax - vmin) / interval))
-    cmap = plt.get_cmap(CMAP, n_levels)
-    map_colours = (cmap(np.linspace(0, 1, n_levels))[:, :3] * 255).round().astype(np.uint8)
-    ui_colours = np.array([
-        (255, 255, 255), (0, 0, 0), (32, 32, 32), (64, 64, 64),
-        (96, 96, 96), (128, 128, 128), (160, 160, 160), (192, 192, 192),
-        (224, 224, 224), (240, 240, 240), (255, 0, 0), (0, 0, 255),
-        (0, 128, 0), (255, 255, 0), (255, 0, 255), (0, 255, 255),
-    ], dtype=np.uint8)
-    colours = np.concatenate((map_colours, ui_colours))
-    colours = np.vstack((colours, np.resize(ui_colours, (256 - len(colours), 3))))
-    palette = Image.new("P", (256, 1))
-    palette.putpalette(colours.ravel().tolist())
-    return palette
-
-
 def _subplot_layout(n_panels: int) -> tuple[int, int]:
     """Return the preferred (rows, columns) layout for ``n_panels``."""
     preferred = {
@@ -112,6 +93,21 @@ def _subplot_layout(n_panels: int) -> tuple[int, int]:
         return 4, 4
     side = int(np.ceil(np.sqrt(n_panels)))
     return side, side
+
+
+def _gif_palette() -> Image.Image:
+    """Return one fixed palette shared by every GIF frame."""
+    cmap = plt.get_cmap(CMAP, 240)
+    map_colours = (cmap(np.linspace(0, 1, 240))[:, :3] * 255).round().astype(np.uint8)
+    ui_colours = np.array([
+        (255, 255, 255), (0, 0, 0), (32, 32, 32), (64, 64, 64),
+        (96, 96, 96), (128, 128, 128), (160, 160, 160), (192, 192, 192),
+        (224, 224, 224), (240, 240, 240), (255, 0, 0), (0, 0, 255),
+        (0, 128, 0), (255, 255, 0), (255, 0, 255), (0, 255, 255),
+    ], dtype=np.uint8)
+    palette = Image.new("P", (256, 1))
+    palette.putpalette(np.concatenate((map_colours, ui_colours)).ravel().tolist())
+    return palette
 
 
 def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
@@ -143,19 +139,11 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
         ax.axis("off")
     fig.colorbar(images[0], ax=axes_flat[:n_panels].tolist(), label="Wind speed (m/s)")
     fig.suptitle(f"Years up to {index + 1} of {frame_count}")
-
     path = Path(output_dir) / f"frame_{index:06d}.png"
-    fig.savefig(path, dpi=100)
+    fig.savefig(path, dpi=100, bbox_inches="tight", pad_inches=0.2)
     plt.close(fig)
 
     return index, str(path)
-
-
-def _progress(completed, total):
-    width = 30
-    filled = int(width * completed / total)
-    print(f"\r[{'#' * filled}{'-' * (width - filled)}] {completed}/{total}",
-          end="", file=sys.stderr, flush=True)
 
 
 def main() -> None:
@@ -171,7 +159,7 @@ def main() -> None:
     parser.add_argument(
         "output",
         type=Path,
-        help="Output H.264 MP4 animation file (.mp4)",
+        help="Output animation file (.gif)",
     )
     parser.add_argument(
         "--return-periods",
@@ -259,7 +247,7 @@ def main() -> None:
         ordered_paths = [path for path in paths if path is not None]
         if len(ordered_paths) != frame_count:
             raise RuntimeError("Not all animation frames were rendered")
-        palette = _gif_palette(args.vmin, args.vmax)
+        palette = _gif_palette()
         images = [
             Image.open(path).convert("RGB").quantize(
                 palette=palette, dither=Image.Dither.FLOYDSTEINBERG
@@ -271,7 +259,7 @@ def main() -> None:
             logging.info("Assembling animation at %s", args.output)
             args.output.parent.mkdir(parents=True, exist_ok=True)
             elapsed_years = np.arange(1, frame_count + 1)
-            frame_fps = np.clip(np.sqrt(elapsed_years), 1, 30)
+            frame_fps = np.clip(np.sqrt(elapsed_years), 1, 50)
             frame_durations_ms = 1000.0 / frame_fps
             images[0].save(
                 args.output,
