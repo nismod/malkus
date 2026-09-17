@@ -196,7 +196,7 @@ def main() -> None:
         "--title",
         type=str,
         default="",
-        help="Plot title text, will prepend year counter. (default: "")"
+        help="Plot title text (default: "")"
     )
     args = parser.parse_args()
 
