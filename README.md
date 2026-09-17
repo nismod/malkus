@@ -5,6 +5,8 @@ wind-hazard footprints and return-period maps. It provides tools for validating
 track data, interpolating storm motion, evaluating gradient winds, applying
 surface-roughness downscaling, and exporting hazard maps.
 
+![rp-map-convergence](./docs/static/lesser-antilles.gif)
+
 ## Installation
 
 For development or reproducible use, install [pixi](https://pixi.prefix.dev/)
@@ -16,44 +18,77 @@ pixi install
 
 ## Example
 
-Tracks are read from Parquet or GeoParquet into a validated `TrackSet`. The
-following illustrates the core workflow:
+Tracks are read from Parquet or GeoParquet into a validated `TrackSet`. One can
+then compute wind fields and return-period hazard maps.
 
 Track inputs should contain the canonical fields required by `TrackSet`,
 including track ID, UTC timestamp, latitude, longitude, maximum wind speed,
 radius to maximum winds, and minimum pressure.
 
+The following illustrates the core workflow:
+
 ```python
 from malkus import (
     RegularGrid,
+    SurfaceRoughness,
     TrackSet,
     TrackSource,
     compute_gradient_winds,
+    downscale_winds,
+    initialize_wind_footprints,
+    return_period_maps,
 )
 
 bounds = (56.2, -21.8, 59.1, -18.9)  # west, south, east, north
 grid = RegularGrid.from_bbox(bounds, resolution=0.1)
-tracks = TrackSet.read_parquet(
+trackset = TrackSet.read_parquet(
     "tracks.geoparquet",
     source=TrackSource.EMANUEL,
 )
-
 footprints = compute_gradient_winds(
-    tracks,
+    trackset,
     grid,
     interpolation_frequency="30min",
 )
-print(footprints)
 ```
 
-Return-period maps are calculated from surface-level footprints. Use
-`downscale_winds` first when surface roughness is required, then pass the
-result to `return_period_maps`.
+The `footprints` object is then a `WindFootprintSet`, an xarray Dataset with
+additional metadata.
 
-For a complete example, including surface-roughness downscaling and Zarr
-output, see [`scripts/trackset_to_rp_maps.py`](scripts/trackset_to_rp_maps.py).
-That workflow expects tropical-cyclone tracks, a land-cover raster, and a
-land-cover-to-roughness mapping table under `data/in/`.
+We can downscale these footprints with a surface roughness technique.
+
+```python
+footprints_store = initialize_wind_footprints(
+    "footprints.zarr",
+    trackset,
+    grid,
+    level="surface",
+)
+surface_roughness = SurfaceRoughness(
+    land_cover_path=land_cover_path,
+    mapping_path=mapping_path,
+)
+surface_footprints = downscale_winds(
+    gradient_footprints,
+    method=surface_roughness,
+    output=footprints_store
+)
+```
+
+And lastly, find the annual maxima and produce wind speed exceedance maps for
+given return periods. These can be written to disk as Zarr and/or sets of
+GeoTIFFs.
+
+```python
+rp_maps = return_period_maps(
+    surface_footprints,
+    return_periods=[5, 10, 20, 50, 100],
+    output="rp-maps.zarr",
+)
+rp_maps.write_geotiffs("rp-maps")
+```
+
+For a complete example, see [`scripts/trackset_to_rp_maps.py`](scripts/trackset_to_rp_maps.py).
 
 ## Development
 
