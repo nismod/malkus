@@ -7,7 +7,8 @@ $ pixi run python scripts/plot_rp_map_accumulation.py \
     lesser-antilles.gif \
     --return-periods 5 10 20 50 100 200 \
     --max-cpus 56 \
-    --max-years 1000
+    --max-years 1000 \
+    --title "Lesser Antilles: CHAZ UKESM1-0-LL 2010"
 """
 
 
@@ -32,6 +33,7 @@ from malkus import WindFootprintSet
 from malkus.hazard.footprint import WIND_VARIABLE
 
 
+MAX_FRAMES = 200  # stride years to accommodate
 CMAP = "magma_r"
 CMAP_UNDER = "white"
 CMAP_INTERVAL = 3
@@ -81,20 +83,6 @@ def _cumulative_maps_lazy(frame_year: int, periods: np.ndarray):
     return current, result
 
 
-def _subplot_layout(n_panels: int) -> tuple[int, int]:
-    """Return the preferred (rows, columns) layout for ``n_panels``."""
-    preferred = {
-        1: (2, 1), 2: (2, 2), 3: (2, 3), 4: (2, 4),
-        5: (3, 3), 6: (3, 4), 7: (4, 4),
-    }
-    if n_panels in preferred:
-        return preferred[n_panels]
-    if n_panels <= 16:
-        return 4, 4
-    side = int(np.ceil(np.sqrt(n_panels)))
-    return side, side
-
-
 def _gif_palette() -> Image.Image:
     """Return one fixed palette shared by every GIF frame."""
     cmap = plt.get_cmap(CMAP, 240)
@@ -110,7 +98,7 @@ def _gif_palette() -> Image.Image:
     return palette
 
 
-def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
+def _render_frame(index, year, year_count, periods, output_dir, vmin, vmax, title):
     if _WORKER_LATS is None or _WORKER_LONS is None:
         raise RuntimeError("Frame worker was not initialized")
 
@@ -121,9 +109,16 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
     norm = BoundaryNorm(levels, cmap.N, clip=False)
 
     n_panels = len(periods) + 1
-    rows, columns = _subplot_layout(n_panels)
-
-    fig, axes = plt.subplots(rows, columns, squeeze=False, figsize=(5 * columns, 3.5 * rows))
+    max_cols = 4
+    rows = n_panels // max_cols + 1
+    cols = n_panels % max_cols + 1
+    fig, axes = plt.subplots(
+        rows,
+        cols,
+        squeeze=False,
+        figsize=(3.5 * cols, 3.5 * rows),
+        layout="constrained",
+    )
     axes_flat = axes.ravel()
     extent = [float(_WORKER_LONS.min()), float(_WORKER_LONS.max()),
               float(_WORKER_LATS.min()), float(_WORKER_LATS.max())]
@@ -133,14 +128,19 @@ def _render_frame(index, year, frame_count, periods, output_dir, vmin, vmax):
         for ax, value in zip(axes_flat, values)
     ]
     axes_flat[0].set_title("Annual maximum")
+    axes_flat[0].text(0.05, 0.92, f"Year {year + 1} of {year_count}", transform=axes_flat[0].transAxes)
+
     for ax, period in zip(axes_flat[1:], periods):
         ax.set_title(f"{period:g}-year RP")
     for ax in axes_flat[n_panels:]:
         ax.axis("off")
-    fig.colorbar(images[0], ax=axes_flat[:n_panels].tolist(), label="Wind speed (m/s)")
-    fig.suptitle(f"Years up to {index + 1} of {frame_count}")
+    fig.colorbar(images[0], ax=axes_flat[:n_panels].tolist(), label=r"Wind speed [ms$^{-1}$]")
+    fig.text(0.5, 1.05, title, ha="center", va="bottom", size=14)
+    fig.text(0.5, -0.05, "Longitude [deg]", ha="center", va="bottom", size=12)
+    fig.text(0, 0.5, "Latitude [deg]", ha="left", va="center", rotation="vertical", size=12)
+    fig.set_constrained_layout_pads(h_pad=0.1)
     path = Path(output_dir) / f"frame_{index:06d}.png"
-    fig.savefig(path, dpi=100, bbox_inches="tight", pad_inches=0.2)
+    fig.savefig(path, dpi=100, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
 
     return index, str(path)
@@ -192,6 +192,12 @@ def main() -> None:
         default=1,
         help="Maximum number of worker processes for frame rendering (default: 1)",
     )
+    parser.add_argument(
+        "--title",
+        type=str,
+        default="",
+        help="Plot title text, will prepend year counter. (default: "")"
+    )
     args = parser.parse_args()
 
     if (
@@ -214,12 +220,21 @@ def main() -> None:
     first_year, last_year = int(years.min()), int(years.max())
     if args.max_years is not None:
         last_year = min(last_year, first_year + args.max_years - 1)
-    frame_years = np.arange(first_year, last_year + 1)
-    frame_count = len(frame_years)
-    worker_count = min(args.max_cpus, frame_count)
 
+    # Which years to plot, given MAX_FRAMES?
+    # Build a set of integers that slowly accelerate. Hit all the low, positive integers.
+    duration = last_year - first_year + 1
+    n_frames = min(MAX_FRAMES, duration)
+    exponent = 3
+    ideal = np.linspace(0, 1, n_frames) ** exponent * duration
+    frame_years = np.empty(n_frames, dtype=int)
+    frame_years[0] = round(ideal[0])
+    for i in range(1, n_frames):
+        frame_years[i] = max(round(ideal[i]), frame_years[i - 1] + 1)
+
+    worker_count = min(args.max_cpus, n_frames)
     with tempfile.TemporaryDirectory(prefix="malkus-rp-frames-") as temp_dir:
-        paths: list[str | None] = [None] * frame_count
+        paths: list[str | None] = [None] * n_frames
         with ProcessPoolExecutor(
             max_workers=worker_count,
             mp_context=mp.get_context("spawn"),
@@ -232,20 +247,21 @@ def main() -> None:
                     _render_frame,
                     i,
                     int(year),
-                    frame_count,
+                    duration,
                     periods,
                     temp_dir,
                     args.vmin,
-                    args.vmax
+                    args.vmax,
+                    args.title,
                 ) for i, year in enumerate(frame_years)
             ]
-            with tqdm(total=frame_count, desc="Rendering frames") as progress:
+            with tqdm(total=n_frames, desc="Rendering frames") as progress:
                 for future in as_completed(futures):
                     index, path = future.result()
                     paths[index] = path
                     progress.update(1)
         ordered_paths = [path for path in paths if path is not None]
-        if len(ordered_paths) != frame_count:
+        if len(ordered_paths) != n_frames:
             raise RuntimeError("Not all animation frames were rendered")
         palette = _gif_palette()
         images = [
@@ -258,8 +274,8 @@ def main() -> None:
         try:
             logging.info("Assembling animation at %s", args.output)
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            elapsed_years = np.arange(1, frame_count + 1)
-            frame_fps = np.clip(np.sqrt(elapsed_years), 1, 50)
+            elapsed_years = np.arange(1, n_frames + 1)
+            frame_fps = np.clip(elapsed_years ** 0.25, 1, 50)
             frame_durations_ms = 1000.0 / frame_fps
             images[0].save(
                 args.output,
