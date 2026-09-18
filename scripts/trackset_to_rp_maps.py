@@ -1,32 +1,17 @@
-"""
-Example script to exercise library.
+"""Create wind fields and return-period maps from tropical-cyclone tracks."""
 
-Run with:
-$ pixi run python trackset_to_rp_maps.py
+from __future__ import annotations
 
-This script is a workflow that:
-- Creates an wind speed evaluation grid
-- Reads parquet formatted tropical cyclone tracks
-- Filters them to an area of interest
-- Interpolates the track observations
-- Evaluates the wind fields for each event
-- Downscales these wind fields using a surface roughness technique
-- Calculates the wind speeds corresponding to a set of provided return periods
-- Saves the interpolated tracks, downscaled per event wind fields and return period maps 
-"""
-
-
+import argparse
 from datetime import datetime
 import logging
 from pathlib import Path
 
 from malkus import (
     RegularGrid,
-    ReturnPeriodMapSet,
     SurfaceRoughness,
     TrackSet,
     TrackSource,
-    WindFootprintSet,
     compute_winds,
     downscale_winds,
     initialize_wind_footprints,
@@ -34,104 +19,114 @@ from malkus import (
 )
 
 
-if __name__ == "__main__":
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("tracks", nargs="+", type=Path, help="Input track Parquet/GeoParquet files")
+    parser.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("WEST", "SOUTH", "EAST", "NORTH"))
+    parser.add_argument("--search-radius-deg", type=float, default=3.0, help="Track search radius in degrees (default: 3)")
+    parser.add_argument("--grid-resolution-deg", type=float, required=True, help="Wind-field grid resolution in degrees")
+    parser.add_argument("--source", choices=[source.value for source in TrackSource], required=True)
+    parser.add_argument("--scenario", required=True, help="Scenario metadata")
+    parser.add_argument("--gcm", required=True, help="GCM metadata")
+    parser.add_argument("--epoch", type=int, required=True, help="Simulation epoch")
+    parser.add_argument("--return-periods", nargs="+", type=float, required=True, help="Positive unique return periods in years")
+    parser.add_argument("--wind-fields", type=Path, required=True, help="Output wind-footprint Zarr store")
+    parser.add_argument("--rp-maps", type=Path, required=True, help="Output return-period-map Zarr store")
+    parser.add_argument("--rp-geotiffs", type=Path, required=True, help="Output GeoTIFF directory")
+    parser.add_argument("--interpolated-tracks", type=Path, help="Optional interpolated-track Parquet output")
+    parser.add_argument("--storm-qc", type=Path, help="Optional storm-QC Parquet output")
+    parser.add_argument("--max-cpus", type=int, default=1, help="Maximum worker processes (default: 1)")
+    parser.add_argument("--batch-size", type=int, default=32, help="Events per worker batch (default: 32)")
+    parser.add_argument("--interp-temp-freq", help="Fixed interpolation frequency, e.g. 1h or 30min (default: 1h)")
+    parser.add_argument("--interp-dist-factor", type=float, help="Adaptive spacing as a multiple of local RMW")
+    parser.add_argument("--land-cover", type=Path, help="Optional land-cover raster for downscaling")
+    parser.add_argument("--roughness-mapping", type=Path, help="Optional land-cover-to-roughness CSV")
+    return parser
 
+
+def _parse_args() -> argparse.Namespace:
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.search_radius_deg <= 0 or args.grid_resolution_deg <= 0:
+        parser.error("search-radius-deg and grid-resolution-deg must be positive")
+    if args.max_cpus < 1 or args.batch_size < 1:
+        parser.error("max-cpus and batch-size must be positive")
+    if args.interp_dist_factor is not None and args.interp_dist_factor <= 0:
+        parser.error("interp-dist-factor must be positive")
+    if args.interp_temp_freq is not None and args.interp_dist_factor is not None:
+        parser.error("interp-temp-freq and interp-dist-factor are mutually exclusive")
+    if any(period <= 0 for period in args.return_periods):
+        parser.error("return-periods must be positive")
+    if len(set(args.return_periods)) != len(args.return_periods):
+        parser.error("return-periods must be unique")
+    if (args.land_cover is None) != (args.roughness_mapping is None):
+        parser.error("land-cover and roughness-mapping must be supplied together")
+    if args.interpolated_tracks is None and args.storm_qc is not None:
+        parser.error("storm-qc requires interpolated-tracks")
+    return args
+
+
+def _ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def main() -> None:
+    args = _parse_args()
     logging.basicConfig(format="%(asctime)s %(process)d %(filename)s %(message)s", level=logging.INFO)
+    started = datetime.now()
+    logging.info("Processing tracks to return-period hazard maps")
 
-    logging.info("Processing tracks to return period hazard maps")
-    t0 = datetime.now()
-
-    # bbox = (56.2, -21.8, 59.1, -18.9)  # Mauritius
-    # name = "mur"
-    # bbox = (-61.96, 13.17, -59.90, 14.63)  # St. Lucia
-    # name = "lca"
-    bbox = (-66.12, 9.69, -58.44, 19.46)  # Lesser Antilles
-    name = "lesser-antilles"
-
-    n_cpu = 48
-    interpolation_frequency = "30min"
-    grid_resolution = 0.05
-
-    input_dir = Path("data/in/")
-
-#   source = TrackSource.EMANUEL
-#   tracks_paths = input_dir / "tracks/emanuel_ssp-585_gcm-cesm2_epoch-2005/tracks.geoparquet"
-#   scenario = "585"
-#   gcm = "cesm2"
-#   epoch = 2005
-#   n_years = 200
-#   return_periods = [1, 2, 5, 10, 20]
-
-    source = TrackSource.CHAZ
-    # tracks_path = input_dir / "tracks/CHAZ_SSP-585_GCM-CESM2_epoch-2010/tracks.geoparquet"
-    tracks_paths = [input_dir / f"tracks/CHAZ_SSP-585_GCM-UKESM1-0-LL_epoch-2010/{i}/tracks.geoparquet" for i in range(5)]
-    gcm = "UKESM1-0-LL"
-    scenario = "SSP585"
-    epoch = 2010
-    return_periods = [5, 10, 20, 50, 100, 200, 500]
-
-    land_cover_path = input_dir / "land_cover/glob_cover_2009/GLOBCOVER_L4_200901_200912_V2.3.tif"
-    mapping_path = input_dir / "land_cover/land_cover_to_surface_roughness.csv"
-
-    out_dir = Path("data/out/")
-    interpolated_tracks_path = out_dir / f"tracks/{name}_{source}_{scenario}_{gcm}_{epoch}.pq"
-    storm_qc_path = out_dir / f"tracks/{name}_{source}_{scenario}_{gcm}_{epoch}_qc.pq"
-    wind_footprints_path = out_dir / f"wind_fields/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
-    rp_maps_zarr_path = out_dir / f"hazard_maps/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
-    rp_maps_tiff_path = out_dir / f"hazard_maps/{name}_{source}_{scenario}_{gcm}_{epoch}"
-
-    grid = RegularGrid.from_bbox(bbox, grid_resolution)
+    bbox = tuple(args.bbox)
+    grid = RegularGrid.from_bbox(bbox, args.grid_resolution_deg)
     logging.info(grid)
-
     trackset = TrackSet.read_parquet(
-        tracks_paths,
-        metadata={
-            "scenario": scenario,
-            "gcm": gcm,
-            "epoch": epoch,
-        },
-        source=source,
+        args.tracks,
+        metadata={"scenario": args.scenario, "gcm": args.gcm, "epoch": args.epoch},
+        source=TrackSource(args.source),
         bbox=bbox,
-        search_radius_deg=3,
+        search_radius_deg=args.search_radius_deg,
     )
     logging.info(trackset)
 
-    logging.info("Compute winds")
-    wind_footprints: WindFootprintSet = compute_winds(
-        trackset,
-        grid,
-        interpolation_frequency=interpolation_frequency,
-        interpolated_tracks_path=interpolated_tracks_path,
-        storm_qc_path=storm_qc_path,
-        n_workers=n_cpu,
-    )
+    for path in (args.wind_fields, args.rp_maps, args.interpolated_tracks, args.storm_qc):
+        if path is not None:
+            _ensure_parent(path)
+    args.rp_geotiffs.mkdir(parents=True, exist_ok=True)
+    frequency = args.interp_temp_freq or "1h"
 
-    logging.info("Initialize footprint store")
-    footprints_store: WindFootprintSet = initialize_wind_footprints(
-        wind_footprints_path,
-        trackset,
-        grid,
+    logging.info("Computing wind fields")
+    compute_kwargs = dict(
+        interpolation_frequency=frequency,
+        interpolation_spacing_factor=args.interp_dist_factor,
+        interpolated_tracks_path=args.interpolated_tracks,
+        storm_qc_path=args.storm_qc,
+        n_workers=args.max_cpus,
+        batch_size=args.batch_size,
     )
+    if args.land_cover is None:
+        wind_fields = compute_winds(
+            trackset,
+            grid,
+            output=initialize_wind_footprints(args.wind_fields, trackset, grid),
+            **compute_kwargs,
+        )
+    else:
+        computed = compute_winds(trackset, grid, **compute_kwargs)
+        logging.info("Downscaling wind fields")
+        wind_fields = downscale_winds(
+            computed,
+            method=SurfaceRoughness(
+                land_cover_path=args.land_cover,
+                mapping_path=args.roughness_mapping,
+            ),
+            output=initialize_wind_footprints(args.wind_fields, trackset, grid),
+        )
 
-    logging.info("Downscale winds")
-    surface_roughness = SurfaceRoughness(
-        land_cover_path=land_cover_path,
-        mapping_path=mapping_path,
-    )
-    downscaled_footprints: WindFootprintSet = downscale_winds(
-        wind_footprints,
-        method=surface_roughness,
-        output=footprints_store
-    )
-    logging.info(downscaled_footprints)
+    logging.info("Computing return-period maps")
+    maps = return_period_maps(wind_fields, args.return_periods, output=args.rp_maps)
+    maps.write_geotiffs(args.rp_geotiffs)
+    logging.info("Completed in %s", datetime.now() - started)
 
-    logging.info("Calculate return-period maps")
-    rp_maps: ReturnPeriodMapSet = return_period_maps(
-        downscaled_footprints,
-        return_periods=return_periods,
-        output=rp_maps_zarr_path,
-    )
-    rp_maps.write_geotiffs(rp_maps_tiff_path)
-    logging.info(rp_maps)
 
-    logging.info(f"Done in {datetime.now() - t0}")
+if __name__ == "__main__":
+    main()
