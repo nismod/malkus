@@ -220,6 +220,7 @@ def compute_winds(
     output: WindFootprintSet | None = None,
     profile: WindProfile = holland_1980,
     interpolation_frequency: str = "1h",
+    interpolation_spacing_factor: float | None = None,
     evaluation_radius_m: float = 1_000_000,
     interpolated_tracks_path: str | Path | None = None,
     storm_qc_path: str | Path | None = None,
@@ -241,6 +242,7 @@ def compute_winds(
             _prepare_track_for_wind_evaluation(
                 track,
                 interpolation_frequency=interpolation_frequency,
+                interpolation_spacing_factor=interpolation_spacing_factor,
                 wind_speed_reference=wind_speed_reference,
             ),
         )
@@ -273,6 +275,7 @@ def compute_winds(
                 attrs={
                     **trackset.footprint_metadata,
                     "interpolation_frequency": interpolation_frequency,
+                    "interpolation_spacing_factor": interpolation_spacing_factor,
                     "evaluation_radius_m": evaluation_radius_m,
                     "wind_profile": getattr(profile, "__name__", type(profile).__name__),
                 },
@@ -293,6 +296,7 @@ def compute_winds(
         root,
         profile=profile,
         interpolation_frequency=interpolation_frequency,
+        interpolation_spacing_factor=interpolation_spacing_factor,
         evaluation_radius_m=evaluation_radius_m,
     )
     for event_id, footprint in _iter_event_footprints(
@@ -359,6 +363,7 @@ def _compute_event_footprint(
     *,
     profile: WindProfile = holland_1980,
     interpolation_frequency: str = "1h",
+    interpolation_spacing_factor: float | None = None,
     evaluation_radius_m: float = 1_000_000,
 ) -> np.ndarray:
     """Compute one earth-relative event footprint from a raw track."""
@@ -366,6 +371,7 @@ def _compute_event_footprint(
     prepared = _prepare_track_for_wind_evaluation(
         track,
         interpolation_frequency=interpolation_frequency,
+        interpolation_spacing_factor=interpolation_spacing_factor,
         wind_speed_reference=WindSpeedReference.EARTH_RELATIVE,
     )
     return _evaluate_prepared_event_footprint(
@@ -432,11 +438,16 @@ def _prepare_track_for_wind_evaluation(
     track: pd.DataFrame,
     *,
     interpolation_frequency: str,
+    interpolation_spacing_factor: float | None = None,
     wind_speed_reference: WindSpeedReference,
 ) -> pd.DataFrame:
     """Interpolate a track and add motion and wind-frame QC fields."""
 
-    interpolated = interpolate_track(track, interpolation_frequency)
+    interpolated = interpolate_track(
+        track,
+        interpolation_frequency,
+        spacing_factor=interpolation_spacing_factor,
+    )
     if len(interpolated) == 1:
         result = interpolated.copy()
         result["translation_heading_deg"] = 0.0
@@ -629,6 +640,7 @@ def _set_wind_provenance(
     *,
     profile: WindProfile,
     interpolation_frequency: str,
+    interpolation_spacing_factor: float | None,
     evaluation_radius_m: float,
 ) -> None:
     """Record calculation settings, rejecting incompatible resumed writes."""
@@ -636,6 +648,7 @@ def _set_wind_provenance(
     provenance = {
         "wind_profile": getattr(profile, "__name__", type(profile).__name__),
         "interpolation_frequency": interpolation_frequency,
+        "interpolation_spacing_factor": interpolation_spacing_factor,
         "evaluation_radius_m": evaluation_radius_m,
     }
     for name, value in provenance.items():

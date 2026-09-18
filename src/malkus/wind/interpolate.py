@@ -16,8 +16,18 @@ INTERPOLATED_COLUMNS = (
 )
 
 
-def interpolate_track(track: pd.DataFrame, frequency: str = "1h") -> pd.DataFrame:
-    """Interpolate a canonical single track to a regular UTC time interval."""
+def interpolate_track(
+    track: pd.DataFrame,
+    frequency: str = "1h",
+    *,
+    spacing_factor: float | None = None,
+) -> pd.DataFrame:
+    """Interpolate a track on a regular time or adaptive spatial interval.
+
+    When ``spacing_factor`` is supplied, successive eye positions are spaced
+    by approximately ``spacing_factor * radius_to_max_winds``.  The regular
+    frequency path is retained when it is ``None``.
+    """
 
     require_columns(track, ("track_id", "time_utc", *INTERPOLATED_COLUMNS), "interpolate_track")
     if track.empty:
@@ -27,6 +37,10 @@ def interpolate_track(track: pd.DataFrame, frequency: str = "1h") -> pd.DataFram
         raise ValueError("interpolate_track accepts exactly one track_id")
     if track["time_utc"].duplicated().any():
         raise ValueError("Track contains duplicate time_utc observations")
+    if spacing_factor is not None:
+        if not np.isfinite(spacing_factor) or spacing_factor <= 0:
+            raise ValueError("spacing_factor must be finite and positive")
+        return _interpolate_track_by_distance(track, spacing_factor)
     if len(track) == 1:
         return track.reset_index(drop=True)
 
@@ -43,6 +57,85 @@ def interpolate_track(track: pd.DataFrame, frequency: str = "1h") -> pd.DataFram
     if result.loc[:, INTERPOLATED_COLUMNS].isna().any().any():
         raise ValueError("Track interpolation left missing wind or position values")
     result = result.reset_index(names="time_utc")
+    if "timestep" in result.columns:
+        result["timestep"] = np.arange(len(result), dtype=int)
+    return result
+
+
+def _interpolate_track_by_distance(
+    track: pd.DataFrame, spacing_factor: float
+) -> pd.DataFrame:
+    """Interpolate a track using an RMW-scaled eye-travel distance."""
+
+    if len(track) == 1:
+        return track.reset_index(drop=True)
+
+    lons = track["lon"].to_numpy(dtype=float)
+    lats = track["lat"].to_numpy(dtype=float)
+    rmw_m = track["radius_to_max_winds_km"].to_numpy(dtype=float) * 1_000.0
+    geod = pyproj.Geod(ellps="WGS84")
+    azimuth, _, distances = geod.inv(lons[:-1], lats[:-1], lons[1:], lats[1:])
+    if not np.isfinite(rmw_m).all() or (rmw_m <= 0).any():
+        raise ValueError("radius_to_max_winds_km must be finite and positive")
+
+    points: list[tuple[int, float]] = [(0, 0.0)]
+    accumulated = 0.0
+    segment = 0
+    fraction = 0.0
+    while segment < len(distances):
+        segment_distance = float(distances[segment])
+        if segment_distance <= 0:
+            segment += 1
+            fraction = 0.0
+            continue
+
+        local_rmw = rmw_m[segment] + fraction * (rmw_m[segment + 1] - rmw_m[segment])
+        target = spacing_factor * local_rmw
+        remaining = segment_distance * (1.0 - fraction)
+        if accumulated >= target:
+            point = (segment, fraction)
+            if points[-1] != point:
+                points.append(point)
+            accumulated = 0.0
+            continue
+        if accumulated + remaining >= target:
+            travel = target - accumulated
+            fraction += travel / segment_distance
+            fraction = min(fraction, 1.0)
+            points.append((segment, fraction))
+            accumulated = 0.0
+            if fraction >= 1.0 - 1e-12:
+                segment += 1
+                fraction = 0.0
+        else:
+            accumulated += remaining
+            segment += 1
+            fraction = 0.0
+
+    if points[-1] != (len(track) - 2, 1.0):
+        points.append((len(track) - 2, 1.0))
+
+    rows = []
+    for segment, fraction in points:
+        left = track.iloc[segment]
+        right = track.iloc[min(segment + 1, len(track) - 1)]
+        row = left.copy()
+        for column in INTERPOLATED_COLUMNS:
+            if column in ("lat", "lon"):
+                continue
+            row[column] = left[column] + fraction * (right[column] - left[column])
+        lon, lat, _ = geod.fwd(
+            lons[segment], lats[segment], azimuth[segment], distances[segment] * fraction
+        )
+        row["lon"] = lon
+        row["lat"] = lat
+        timestamp = left["time_utc"] + fraction * (
+            right["time_utc"] - left["time_utc"]
+        )
+        row["time_utc"] = timestamp
+        rows.append(row)
+
+    result = pd.DataFrame(rows).reset_index(drop=True)
     if "timestep" in result.columns:
         result["timestep"] = np.arange(len(result), dtype=int)
     return result
