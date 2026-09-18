@@ -2,7 +2,7 @@
 
 `malkus` is a Python library for turning tropical-cyclone track catalogues into
 wind-hazard footprints and return-period maps. It provides tools for validating
-track data, interpolating storm motion, evaluating gradient winds, applying
+track data, interpolating storm motion, evaluating wind fields, applying
 surface-roughness downscaling, and exporting hazard maps.
 
 ![rp-map-convergence](./docs/static/lesser-antilles.gif)
@@ -32,7 +32,7 @@ from malkus import (
     SurfaceRoughness,
     TrackSet,
     TrackSource,
-    compute_gradient_winds,
+    compute_winds,
     downscale_winds,
     initialize_wind_footprints,
     return_period_maps,
@@ -44,7 +44,7 @@ trackset = TrackSet.read_parquet(
     "tracks.geoparquet",
     source=TrackSource.EMANUEL,
 )
-footprints = compute_gradient_winds(
+wind_footprints = compute_winds(
     trackset,
     grid,
     interpolation_frequency="30min",
@@ -61,14 +61,13 @@ footprints_store = initialize_wind_footprints(
     "footprints.zarr",
     trackset,
     grid,
-    level="surface",
 )
 surface_roughness = SurfaceRoughness(
     land_cover_path=land_cover_path,
     mapping_path=mapping_path,
 )
-surface_footprints = downscale_winds(
-    gradient_footprints,
+downscaled_footprints = downscale_winds(
+    wind_footprints,
     method=surface_roughness,
     output=footprints_store
 )
@@ -80,7 +79,7 @@ GeoTIFFs.
 
 ```python
 rp_maps = return_period_maps(
-    surface_footprints,
+    downscaled_footprints,
     return_periods=[5, 10, 20, 50, 100],
     output="rp-maps.zarr",
 )

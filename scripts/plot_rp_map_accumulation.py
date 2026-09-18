@@ -154,7 +154,7 @@ def main() -> None:
     parser.add_argument(
         "input",
         type=Path,
-        help="Input surface-wind footprint Zarr store (.zarr)",
+        help="Input wind-footprint Zarr store (.zarr)",
     )
     parser.add_argument(
         "output",

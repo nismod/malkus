@@ -2,7 +2,7 @@
 
 from .hazard.footprint import (
     WindFootprintSet,
-    compute_gradient_winds,
+    compute_winds,
     downscale_winds,
     initialize_wind_footprints,
 )
@@ -22,7 +22,7 @@ __all__ = [
     "WindFootprintSet",
     "ReturnPeriodMapSet",
     "SurfaceRoughness",
-    "compute_gradient_winds",
+    "compute_winds",
     "downscale_winds",
     "evaluate_at_points",
     "holland_1980",

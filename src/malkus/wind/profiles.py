@@ -1,4 +1,4 @@
-"""Parametric gradient-wind profiles."""
+"""Parametric wind profiles."""
 
 from typing import Protocol
 
@@ -7,7 +7,7 @@ import numpy as np
 
 
 class WindProfile(Protocol):
-    """A radial gradient-wind profile evaluated around a cyclone eye."""
+    """A radial wind profile evaluated around a cyclone eye."""
 
     def __call__(
         self,
@@ -31,7 +31,7 @@ def holland_1980(
     env_pressure_pa: float,
     lat_deg: float,
 ) -> np.ndarray:
-    """Return Holland (1980) gradient wind speeds at radii in metres."""
+    """Return Holland (1980) wind speeds at radii in metres."""
 
     molar_mass_air = 0.02897
     gas_constant = 8.314

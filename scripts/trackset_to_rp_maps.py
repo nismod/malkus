@@ -27,7 +27,7 @@ from malkus import (
     TrackSet,
     TrackSource,
     WindFootprintSet,
-    compute_gradient_winds,
+    compute_winds,
     downscale_winds,
     initialize_wind_footprints,
     return_period_maps,
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     out_dir = Path("data/out/")
     interpolated_tracks_path = out_dir / f"tracks/{name}_{source}_{scenario}_{gcm}_{epoch}.pq"
     storm_qc_path = out_dir / f"tracks/{name}_{source}_{scenario}_{gcm}_{epoch}_qc.pq"
-    surface_footprints_path = out_dir / f"wind_fields/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
+    wind_footprints_path = out_dir / f"wind_fields/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
     rp_maps_zarr_path = out_dir / f"hazard_maps/{name}_{source}_{scenario}_{gcm}_{epoch}.zarr"
     rp_maps_tiff_path = out_dir / f"hazard_maps/{name}_{source}_{scenario}_{gcm}_{epoch}"
 
@@ -96,8 +96,8 @@ if __name__ == "__main__":
     )
     logging.info(trackset)
 
-    logging.info("Compute gradient winds")
-    gradient_footprints: WindFootprintSet = compute_gradient_winds(
+    logging.info("Compute winds")
+    wind_footprints: WindFootprintSet = compute_winds(
         trackset,
         grid,
         interpolation_frequency=interpolation_frequency,
@@ -108,10 +108,9 @@ if __name__ == "__main__":
 
     logging.info("Initialize footprint store")
     footprints_store: WindFootprintSet = initialize_wind_footprints(
-        surface_footprints_path,
+        wind_footprints_path,
         trackset,
         grid,
-        level="surface",
     )
 
     logging.info("Downscale winds")
@@ -119,16 +118,16 @@ if __name__ == "__main__":
         land_cover_path=land_cover_path,
         mapping_path=mapping_path,
     )
-    surface_footprints: WindFootprintSet = downscale_winds(
-        gradient_footprints,
+    downscaled_footprints: WindFootprintSet = downscale_winds(
+        wind_footprints,
         method=surface_roughness,
         output=footprints_store
     )
-    logging.info(surface_footprints)
+    logging.info(downscaled_footprints)
 
     logging.info("Calculate return-period maps")
     rp_maps: ReturnPeriodMapSet = return_period_maps(
-        surface_footprints,
+        downscaled_footprints,
         return_periods=return_periods,
         output=rp_maps_zarr_path,
     )

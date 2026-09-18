@@ -26,7 +26,7 @@ def evaluate_at_points(
     profile: WindProfile = holland_1980,
     return_components: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-    """Evaluate gradient winds at point coordinates.
+    """Evaluate winds at point coordinates.
 
     The returned components are ``(u_east_ms, v_north_ms)``. The Lin--Chavas
     advective component is smoothly tapered with the 1,000 km sigmoid;

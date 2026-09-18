@@ -12,7 +12,7 @@ from malkus import (
     TrackSet,
     WindFootprintSet,
     WindSpeedReference,
-    compute_gradient_winds,
+    compute_winds,
     downscale_winds,
     initialize_wind_footprints,
 )
@@ -49,13 +49,13 @@ def test_internal_event_footprint_is_grid_shaped_and_nonzero(
     assert np.isfinite(footprint).all()
 
 
-def test_gradient_catalogue_has_event_and_year_coordinates(
+def test_wind_catalogue_has_event_and_year_coordinates(
     multi_trackset: Callable[[], TrackSet],
 ):
     grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.25)
-    footprints = compute_gradient_winds(multi_trackset(), grid)
+    footprints = compute_winds(multi_trackset(), grid)
     assert isinstance(footprints, WindFootprintSet)
-    assert footprints.level == "gradient"
+    assert "wind_level" not in footprints.data.attrs
     assert footprints.complete
     assert footprints.data.max_wind_speed_ms.shape == (2, *grid.shape)
     assert footprints.event_ids.tolist() == ["storm-1", "storm-2"]
@@ -65,22 +65,22 @@ def test_gradient_catalogue_has_event_and_year_coordinates(
     assert footprints.data.attrs["is_synthetic"] is True
 
 
-def test_gradient_winds_require_a_resolved_wind_reference(
+def test_winds_require_a_resolved_wind_reference(
     track_frame: Callable[[], pd.DataFrame],
 ):
     grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.25)
     trackset = TrackSet(track_frame(), source="custom-model", is_synthetic=True)
     with pytest.raises(ValueError, match="known source or an explicit"):
-        compute_gradient_winds(trackset, grid)
+        compute_winds(trackset, grid)
 
 
-def test_gradient_winds_write_optional_qc_parquet_outputs(
+def test_winds_write_optional_qc_parquet_outputs(
     tmp_path, multi_trackset: Callable[[], TrackSet]
 ):
     grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.25)
     interpolated_path = tmp_path / "interpolated_tracks.pq"
     summary_path = tmp_path / "storm_qc.pq"
-    compute_gradient_winds(
+    compute_winds(
         multi_trackset(),
         grid,
         interpolated_tracks_path=interpolated_path,
@@ -105,36 +105,34 @@ def test_gradient_winds_write_optional_qc_parquet_outputs(
     assert set(summary["model_family"]) == {"test"}
 
 
-def test_partitioned_zarr_gradient_matches_in_memory_and_rejects_rewrites(
+def test_partitioned_wind_fields_match_in_memory_and_reject_rewrites(
     tmp_path, multi_trackset: Callable[[], TrackSet]
 ):
     trackset = multi_trackset()
     grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.25)
-    expected = compute_gradient_winds(trackset, grid)
-    store = initialize_wind_footprints(
-        tmp_path / "gradient.zarr", trackset, grid, level="gradient"
-    )
+    expected = compute_winds(trackset, grid)
+    store = initialize_wind_footprints(tmp_path / "winds.zarr", trackset, grid)
     first = trackset._with_tracks(
         trackset.tracks.loc[trackset.tracks.track_id == "storm-1"]
     )
     second = trackset._with_tracks(
         trackset.tracks.loc[trackset.tracks.track_id == "storm-2"]
     )
-    compute_gradient_winds(first, grid, output=store)
+    compute_winds(first, grid, output=store)
     assert not store.complete
-    compute_gradient_winds(second, grid, output=store)
+    compute_winds(second, grid, output=store)
     assert store.complete
     np.testing.assert_allclose(
         store.data.max_wind_speed_ms.values, expected.data.max_wind_speed_ms.values
     )
     with pytest.raises(ValueError, match="already exist"):
-        compute_gradient_winds(first, grid, output=store)
+        compute_winds(first, grid, output=store)
     unknown = trackset._with_tracks(trackset.tracks.assign(track_id="unknown"))
     with pytest.raises(ValueError, match="no events"):
-        compute_gradient_winds(unknown, grid, output=store)
+        compute_winds(unknown, grid, output=store)
 
 
-def test_downscale_catalogue_to_separate_surface_store(
+def test_downscale_catalogue_to_separate_store(
     tmp_path, multi_trackset: Callable[[], TrackSet]
 ):
     grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.1)
@@ -163,28 +161,28 @@ def test_downscale_catalogue_to_separate_surface_store(
     pd.DataFrame(
         {"glob_cover_2009_id": [1], "roughness_length_m": [0.05]}
     ).to_csv(mapping_path, index=False)
-    gradient = compute_gradient_winds(multi_trackset(), grid)
+    wind_footprints = compute_winds(multi_trackset(), grid)
     downscaled = downscale_winds(
-        gradient,
+        wind_footprints,
         method=SurfaceRoughness(
             land_cover_path=land_cover_path,
             mapping_path=mapping_path,
         ),
     )
-    assert downscaled.level == "surface"
-    assert downscaled.event_ids.tolist() == gradient.event_ids.tolist()
-    np.testing.assert_allclose(downscaled.data.year, gradient.data.year)
+    assert "wind_level" not in downscaled.data.attrs
+    assert downscaled.event_ids.tolist() == wind_footprints.event_ids.tolist()
+    np.testing.assert_allclose(downscaled.data.year, wind_footprints.data.year)
     assert np.isfinite(downscaled.data.max_wind_speed_ms.values).all()
     assert float(downscaled.data.max_wind_speed_ms.max()) <= float(
-        gradient.data.max_wind_speed_ms.max()
+        wind_footprints.data.max_wind_speed_ms.max()
     )
-    surface_store = initialize_wind_footprints(
-        tmp_path / "surface.zarr", multi_trackset(), grid, level="surface"
+    downscaled_store = initialize_wind_footprints(
+        tmp_path / "downscaled.zarr", multi_trackset(), grid
     )
     written = downscale_winds(
-        gradient, method=lambda _: np.ones(grid.shape), output=surface_store
+        wind_footprints, method=lambda _: np.ones(grid.shape), output=downscaled_store
     )
     assert written.complete
     np.testing.assert_allclose(
-        written.data.max_wind_speed_ms, gradient.data.max_wind_speed_ms
+        written.data.max_wind_speed_ms, wind_footprints.data.max_wind_speed_ms
     )

@@ -129,8 +129,6 @@ def return_period_maps(
     are linearly interpolated; values outside the range use the nearest rank.
     """
 
-    if footprints.level != "surface":
-        raise ValueError("return_period_maps requires surface wind footprints")
     footprints.require_complete()
     periods = np.asarray(return_periods, dtype=float)
     if periods.ndim != 1 or not len(periods):

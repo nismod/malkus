@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
 from pathlib import Path
 from textwrap import indent
-from typing import Any, Iterator, Literal
+from typing import Any, Iterator
 
 import numpy as np
 import pandas as pd
@@ -24,7 +24,6 @@ from malkus.wind.interpolate import derive_track_motion, interpolate_track
 from malkus.wind.profiles import WindProfile, holland_1980
 
 
-WIND_LEVELS = frozenset({"gradient", "surface"})
 WIND_VARIABLE = "max_wind_speed_ms"
 
 
@@ -147,10 +146,6 @@ class WindFootprintSet:
         return self.path is not None
 
     @property
-    def level(self) -> str:
-        return str(self.data.attrs["wind_level"])
-
-    @property
     def grid(self) -> RegularGrid:
         data = self.data
         return RegularGrid(
@@ -183,20 +178,16 @@ def initialize_wind_footprints(
     trackset: TrackSet,
     grid: RegularGrid,
     *,
-    level: Literal["gradient", "surface"],
     metadata: dict[str, Any] | None = None,
 ) -> WindFootprintSet:
     """Create an empty event-footprint Zarr store for external worker writes."""
 
-    if level not in WIND_LEVELS:
-        raise ValueError(f"level must be one of {sorted(WIND_LEVELS)}")
     path = Path(path)
 
     event_ids, years = _event_metadata(trackset)
     attrs = {**trackset.footprint_metadata, **({} if metadata is None else metadata)}
     attrs.update(
         {
-            "wind_level": level,
             "grid_resolution_deg": grid.resolution,
         }
     )
@@ -222,7 +213,7 @@ def initialize_wind_footprints(
     return WindFootprintSet.open(path)
 
 
-def compute_gradient_winds(
+def compute_winds(
     trackset: TrackSet,
     grid: RegularGrid,
     *,
@@ -235,10 +226,10 @@ def compute_gradient_winds(
     n_workers: int = 1,
     batch_size: int = 32,
 ) -> WindFootprintSet:
-    """Compute maximum gradient-wind footprints for every track in a TrackSet.
+    """Compute maximum wind footprints for every track in a TrackSet.
 
     With no ``output``, return an in-memory collection. With an initialized
-    gradient store, write only the supplied tracks by matching ``track_id``.
+    store, write only the supplied tracks by matching ``track_id``.
     This makes independent external event partitions safe to calculate.
     """
 
@@ -279,7 +270,6 @@ def compute_gradient_winds(
                 event_ids,
                 years,
                 grid,
-                level="gradient",
                 attrs={
                     **trackset.footprint_metadata,
                     "interpolation_frequency": interpolation_frequency,
@@ -289,7 +279,7 @@ def compute_gradient_winds(
             )
         )
 
-    _validate_store_for_tracks(output, trackset, grid, level="gradient")
+    _validate_store_for_tracks(output, trackset, grid)
     assert output.path is not None
     event_indices = {event_id: index for index, event_id in enumerate(output.event_ids)}
     computed = np.asarray(output.data["computed"].values)
@@ -299,7 +289,7 @@ def compute_gradient_winds(
         raise ValueError(f"Footprints already exist for events: {already_computed[:5]}")
 
     root = zarr.open_group(output.path, mode="r+")
-    _set_gradient_provenance(
+    _set_wind_provenance(
         root,
         profile=profile,
         interpolation_frequency=interpolation_frequency,
@@ -316,49 +306,46 @@ def compute_gradient_winds(
 
 
 def downscale_winds(
-    gradient: WindFootprintSet,
+    input_footprints: WindFootprintSet,
     *,
     method: Any,
     output: WindFootprintSet | None = None,
 ) -> WindFootprintSet:
-    """Apply a static grid-aligned downscaling method to gradient footprints."""
+    """Apply a static grid-aligned downscaling method to wind footprints."""
 
-    if gradient.level != "gradient":
-        raise ValueError("downscale_winds requires gradient wind footprints")
-    gradient.require_complete()
+    input_footprints.require_complete()
     if not callable(method):
         raise TypeError("method must be a callable that returns grid-aligned factors")
-    factors = np.asarray(method(gradient.grid), dtype=np.float32)
-    if factors.shape != gradient.grid.shape:
-        raise ValueError("Downscaling factors must have shape gradient.grid.shape")
+    factors = np.asarray(method(input_footprints.grid), dtype=np.float32)
+    if factors.shape != input_footprints.grid.shape:
+        raise ValueError("Downscaling factors must have the footprint grid shape")
     if not np.isfinite(factors).all() or (factors < 0).any():
         raise ValueError("Downscaling factors must be finite and non-negative")
 
     if output is None:
-        data = gradient.data
+        data = input_footprints.data
         fields = np.asarray(data[WIND_VARIABLE].values, dtype=np.float32) * factors
         return WindFootprintSet(
             dataset=_footprint_dataset(
                 fields,
-                gradient.event_ids,
-                data["year"].values,
-                gradient.grid,
-                level="surface",
-                attrs={
-                    **gradient.data.attrs,
-                    "downscaling_method": type(method).__name__,
-                },
+                    input_footprints.event_ids,
+                    data["year"].values,
+                    input_footprints.grid,
+                    attrs={
+                        **data.attrs,
+                        "downscaling_method": type(method).__name__,
+                    },
             )
         )
 
-    _validate_store_matches_footprints(output, gradient, level="surface")
+    _validate_store_matches_footprints(output, input_footprints)
     assert output.path is not None
     target_computed = np.asarray(output.data["computed"].values)
     if target_computed.any():
         raise ValueError("Surface output store already contains computed events")
-    source = gradient.data
+    source = input_footprints.data
     root = zarr.open_group(output.path, mode="r+")
-    for event_index in range(len(gradient.event_ids)):
+    for event_index in range(len(input_footprints.event_ids)):
         root[WIND_VARIABLE][event_index] = (
             np.asarray(source[WIND_VARIABLE].isel(event=event_index).values) * factors
         ).astype(np.float32)
@@ -567,7 +554,6 @@ def _footprint_dataset(
     years: np.ndarray,
     grid: RegularGrid,
     *,
-    level: str,
     attrs: dict[str, Any],
 ) -> xr.Dataset:
     return xr.Dataset(
@@ -583,7 +569,6 @@ def _footprint_dataset(
         },
         attrs={
             **attrs,
-            "wind_level": level,
             "grid_resolution_deg": grid.resolution,
         },
     )
@@ -600,8 +585,6 @@ def _validate_footprint_dataset(dataset: xr.Dataset) -> None:
         raise ValueError("computed must have dimension (event,)")
     if dataset["year"].dims != ("event",):
         raise ValueError("year must have dimension (event,)")
-    if str(dataset.attrs.get("wind_level")) not in WIND_LEVELS:
-        raise ValueError("Footprint dataset has an invalid wind_level")
     if "grid_resolution_deg" not in dataset.attrs:
         raise ValueError("Footprint dataset is missing grid_resolution_deg")
 
@@ -610,13 +593,9 @@ def _validate_store_for_tracks(
     output: WindFootprintSet,
     trackset: TrackSet,
     grid: RegularGrid,
-    *,
-    level: str,
 ) -> None:
     if not output.is_persisted:
         raise ValueError("output must be an initialized Zarr WindFootprintSet")
-    if output.level != level:
-        raise ValueError(f"output must have wind_level={level!r}")
     _validate_grid(output.grid, grid)
     available = set(output.event_ids)
     missing = set(trackset.track_ids.astype(str)).difference(available)
@@ -625,17 +604,15 @@ def _validate_store_for_tracks(
 
 
 def _validate_store_matches_footprints(
-    output: WindFootprintSet, source: WindFootprintSet, *, level: str
+    output: WindFootprintSet, source: WindFootprintSet
 ) -> None:
     if not output.is_persisted:
         raise ValueError("output must be an initialized Zarr WindFootprintSet")
-    if output.level != level:
-        raise ValueError(f"output must have wind_level={level!r}")
     _validate_grid(output.grid, source.grid)
     if not np.array_equal(output.event_ids, source.event_ids):
-        raise ValueError("Surface output store events must exactly match gradient events")
+        raise ValueError("Output store events must exactly match input events")
     if not np.array_equal(output.data["year"].values, source.data["year"].values):
-        raise ValueError("Surface output store years must exactly match gradient years")
+        raise ValueError("Output store years must exactly match input years")
 
 
 def _validate_grid(actual: RegularGrid, expected: RegularGrid) -> None:
@@ -647,7 +624,7 @@ def _validate_grid(actual: RegularGrid, expected: RegularGrid) -> None:
         raise ValueError("Footprint store grid does not match the requested grid")
 
 
-def _set_gradient_provenance(
+def _set_wind_provenance(
     root: zarr.Group,
     *,
     profile: WindProfile,

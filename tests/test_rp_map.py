@@ -51,9 +51,7 @@ def test_return_period_maps_matches_reopened_surface_store(
 ):
     trackset = multi_trackset()
     grid = RegularGrid.from_bbox((119.5, 9.5, 120.5, 10.5), 1.0)
-    store = initialize_wind_footprints(
-        tmp_path / "surface.zarr", trackset, grid, level="surface"
-    )
+    store = initialize_wind_footprints(tmp_path / "winds.zarr", trackset, grid)
     root = zarr.open_group(store.path, mode="r+")
     root["max_wind_speed_ms"][:] = np.array([[[10.0]], [[20.0]]])
     root["computed"][:] = True
@@ -114,8 +112,6 @@ def test_downscale_and_return_period_reject_incomplete_stores(
     tmp_path, multi_trackset: Callable[[], TrackSet]
 ):
     grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.25)
-    store = initialize_wind_footprints(
-        tmp_path / "gradient.zarr", multi_trackset(), grid, level="gradient"
-    )
+    store = initialize_wind_footprints(tmp_path / "winds.zarr", multi_trackset(), grid)
     with pytest.raises(ValueError, match="incomplete"):
         downscale_winds(store, method=lambda _: np.ones(grid.shape))
