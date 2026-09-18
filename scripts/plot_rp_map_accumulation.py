@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import datetime
 import logging
 import multiprocessing as mp
 from pathlib import Path
@@ -148,6 +149,7 @@ def _render_frame(index, year, year_count, periods, output_dir, vmin, vmax, titl
 
 def main() -> None:
     logging.basicConfig(format="%(asctime)s %(process)d %(filename)s %(message)s", level=logging.INFO)
+    started = datetime.now()
     logging.info("Creating cumulative return-period map animation")
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -288,7 +290,7 @@ def main() -> None:
             for image in images:
                 image.close()
 
-    logging.info("Done.")
+    logging.info("Completed in %s", datetime.now() - started)
 
 
 if __name__ == "__main__":
