@@ -44,12 +44,14 @@ def interpolate_track(
     if len(track) == 1:
         return track.reset_index(drop=True)
 
-    method = "linear" if len(track) == 2 else "quadratic"
     source = track.set_index("time_utc")
     target_index = pd.date_range(source.index[0], source.index[-1], freq=frequency, tz="UTC")
     combined = source.reindex(source.index.union(target_index)).sort_index()
+
+    # TODO: Consider Spherical linear interpolation (SLERP) for position and
+    # Piecewise Cubic Hermite Interpolating Polynomial (PCHIP) for other vars
     combined.loc[:, INTERPOLATED_COLUMNS] = combined.loc[:, INTERPOLATED_COLUMNS].interpolate(
-        method=method, limit_area="inside"
+        method="linear", limit_area="inside"
     )
     result = combined.reindex(target_index)
     metadata_columns = [column for column in result.columns if column not in INTERPOLATED_COLUMNS]
@@ -65,7 +67,11 @@ def interpolate_track(
 def _interpolate_track_by_distance(
     track: pd.DataFrame, spacing_factor: float
 ) -> pd.DataFrame:
-    """Interpolate a track using an RMW-scaled eye-travel distance."""
+    """
+    Interpolate a track using an RMW-scaled eye-travel distance. With
+    evaluation positions RMW * spacing_factor, piecewise linearly interpolate
+    meteorological variables.
+    """
 
     if len(track) == 1:
         return track.reset_index(drop=True)
