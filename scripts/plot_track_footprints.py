@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import datetime
+from datetime import datetime
 import logging
 import multiprocessing as mp
 from pathlib import Path
