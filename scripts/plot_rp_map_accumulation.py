@@ -34,7 +34,7 @@ from malkus import WindFootprintSet
 from malkus.hazard.footprint import WIND_VARIABLE
 
 
-MAX_FRAMES = 200  # stride years to accommodate
+MAX_FRAMES = 200
 CMAP = "magma_r"
 CMAP_UNDER = "white"
 CMAP_INTERVAL = 3
