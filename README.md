@@ -9,7 +9,7 @@ surface-roughness downscaling, and exporting hazard maps.
 
 ## Installation
 
-To use, please install [pixi](https://pixi.prefix.dev/) and run:
+To install, please clone this repository, install [pixi](https://pixi.prefix.dev/) and run:
 
 ```bash
 pixi install
