@@ -76,16 +76,4 @@ def evaluate_at_points(
     if return_components:
         return u_east, v_north
     return np.hypot(u_east, v_north)
-
-
-def max_over_time(field: np.ndarray) -> np.ndarray:
-    """Collapse the time axis by taking the NaN-safe maximum at each grid cell.
-
-    Two-dimensional arrays are treated as already-aggregated spatial fields and are
-    returned unchanged. Higher-dimensional arrays are reduced over axis 0.
-    """
-
-    field = np.asarray(field)
-    if field.ndim <= 2:
-        return field.astype(np.float32, copy=False)
-    return np.nanmax(field, axis=0).astype(np.float32, copy=False)
+    
