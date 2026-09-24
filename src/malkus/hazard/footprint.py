@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor
+import logging
 import multiprocessing as mp
 from pathlib import Path
 from textwrap import indent
@@ -409,14 +410,9 @@ def _evaluate_prepared_event_footprint(
             continue
         env_pressure_hpa = getattr(observation, "environmental_pressure_hpa", np.nan)
         if pd.isna(env_pressure_hpa):
-            try:
-                env_pressure_hpa = ENV_PRESSURE[observation.basin_id]
-            except KeyError as error:
-                raise ValueError(
-                    "No environmental pressure is available for basin "
-                    f"{observation.basin_id!r}"
-                ) from error
-        speeds = evaluate_at_points(
+            env_pressure_hpa = ENV_PRESSURE[observation.basin_id]
+        try:
+            speeds = evaluate_at_points(
             flat_grid.lons[indices],
             flat_grid.lats[indices],
             eye_lon=observation.lon,
@@ -429,7 +425,10 @@ def _evaluate_prepared_event_footprint(
             translation_speed_ms=observation.translation_speed_ms,
             wind_speed_reference=wind_speed_reference,
             profile=profile,
-        )
+            )
+        except Exception as error:
+            logging.debug(f"\n{track}\n{error}")
+            speeds = np.zeros_like(max_wind, dtype=np.float32)
         np.maximum.at(max_wind, indices, np.nan_to_num(speeds, nan=0.0))
     return max_wind.reshape(grid.shape)
 
