@@ -3,19 +3,19 @@
 set -euo pipefail
 
 # Parameters
-TRACKS="data/in/tracks/CHAZ_SSP-585_GCM-UKESM1-0-LL_epoch-2010/tracks.geoparquet"
+TRACKS="data/in/tracks/lesser-antilles/CHAZ_SSP-585_GCM-UKESM1-0-LL_epoch-2010/tracks.geoparquet"
 LAND_COVER="data/in/land_cover/glob_cover_2009/GLOBCOVER_L4_200901_200912_V2.3.tif"
 ROUGHNESS_MAPPING="data/in/land_cover/land_cover_to_surface_roughness.csv"
-BBOX=(-65 9 -58 20)
-GRID_RESOLUTION=0.05
-NAME="lesser-antilles"
+BBOX=(-61.34 13.53 -60.60 14.28)
+GRID_RESOLUTION=$(bc -l <<< "30 * 1 / (60 * 60)")  # 30 arc second
+NAME="lca"
 SOURCE="chaz"
 SCENARIO="SSP585"
 GCM="UKESM1-0-LL"
 EPOCH=2010
-RETURN_PERIODS=(5 10 20 50 100 200)
+RETURN_PERIODS=(5 10 20 50 100)
 MAX_CPUS=48
-INTERP_DIST_FACTOR=0.7
+INTERP_DIST_FACTOR=0.3
 OUTPUT_DIR="data/out"
 
 # Templated output paths
