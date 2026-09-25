@@ -20,6 +20,8 @@ REQUIRED_COLUMNS = frozenset(
         "max_wind_speed_ms",
         "radius_to_max_winds_km",
         "min_pressure_hpa",
+        "lon",
+        "lat",
     }
 )
 
@@ -39,8 +41,6 @@ OPTIONAL_COLUMNS = frozenset(
         "storm_motion_u_ms",
         "storm_motion_v_ms",
         "geometry",
-        "lon",
-        "lat",
     }
 )
 
@@ -58,9 +58,8 @@ _NUMERIC_COLUMNS = frozenset(
 def normalise_track_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """Return canonical UTC timestamps and latitude/longitude coordinates.
 
-    ``lat`` and ``lon`` are preferred when supplied. Missing coordinate columns
-    are derived from point geometry, including GeoParquet inputs that only
-    contain a geometry column.
+    "lat" and "lon" are preferred when supplied. Missing coordinate columns are
+    derived from point geometry if available. Wrap longitude values to [-180, 180).
     """
 
     result = frame.copy()
@@ -84,6 +83,12 @@ def normalise_track_frame(frame: pd.DataFrame) -> pd.DataFrame:
             result["lat"] = geometry.y
         if "lon" not in result.columns:
             result["lon"] = geometry.x
+
+    outside_longitude_range = ~result["lon"].between(-180, 180)
+    result.loc[outside_longitude_range, "lon"] = (
+        (result.loc[outside_longitude_range, "lon"] + 180) % 360 - 180
+    )
+    result = result.drop(columns="geometry", errors="ignore")
 
     return result.sort_values(["track_id", "time_utc"], kind="stable").reset_index(drop=True)
 

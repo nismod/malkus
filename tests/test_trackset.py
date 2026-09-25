@@ -6,6 +6,22 @@ import pandas as pd
 import pytest
 
 from malkus import TrackSet, TrackSource, WindSpeedReference
+from malkus.tracks.schema import normalise_track_frame
+
+
+def test_normalise_track_frame_wraps_longitudes():
+    frame = pd.DataFrame(
+        {
+            "track_id": ["westward", "westward", "global"],
+            "time_utc": pd.date_range("2000-01-01", periods=3, tz="UTC"),
+            "lon": [-181.0, -540.0, 359.0],
+            "lat": [0.0, 0.0, 0.0],
+        }
+    )
+    normalised = normalise_track_frame(frame)
+    assert normalised["lon"].tolist() == [-1.0, 179.0, -180.0]
+
+
 
 
 def test_trackset_normalises_and_selects_tracks(track_frame: Callable[[], pd.DataFrame]):

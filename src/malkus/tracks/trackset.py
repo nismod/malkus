@@ -40,7 +40,6 @@ class TrackSet:
             raise ValueError("Use the is_synthetic TrackSet field, not metadata")
         normalised = normalise_track_frame(self.tracks)
         validate_track_frame(normalised)
-        normalised = normalised.drop(columns="geometry", errors="ignore")
         tracks = gpd.GeoDataFrame(
             normalised,
             geometry=gpd.points_from_xy(normalised["lon"], normalised["lat"]),
