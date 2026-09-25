@@ -98,6 +98,7 @@ class TrackSet:
             metadata_repr = "{}"
         return (
             "TrackSet(\n"
+            f"  source={self.source},\n"
             f"  metadata={metadata_repr},\n"
             f"  is_synthetic={self.is_synthetic},\n"
             f"  aoi={self.aoi},\n"
