@@ -61,7 +61,7 @@ class RegularGrid:
         bbox = ", ".join(f"{coordinate:.3f}" for coordinate in self.bbox)
         return (
             "RegularGrid(\n"
-            f"  resolution={self.resolution},\n"
+            f"  resolution={self.resolution:.6f},\n"
             f"  nlat={self.nlat},\n"
             f"  nlon={self.nlon},\n"
             f"  bbox=({bbox}),\n"
