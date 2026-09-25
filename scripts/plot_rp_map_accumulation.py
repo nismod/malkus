@@ -228,11 +228,15 @@ def main() -> None:
     duration = last_year - first_year + 1
     n_frames = min(MAX_FRAMES, duration)
     exponent = 3
-    ideal = np.linspace(0, 1, n_frames) ** exponent * duration
+    ideal_offsets = np.linspace(0, 1, n_frames) ** exponent * (duration - 1)
     frame_years = np.empty(n_frames, dtype=int)
-    frame_years[0] = round(ideal[0])
+    frame_years[0] = first_year
     for i in range(1, n_frames):
-        frame_years[i] = max(round(ideal[i]), frame_years[i - 1] + 1)
+        frame_years[i] = min(
+            first_year + round(ideal_offsets[i]),
+            last_year,
+        )
+        frame_years[i] = max(frame_years[i], frame_years[i - 1] + 1)
 
     worker_count = min(args.max_cpus, n_frames)
     with tempfile.TemporaryDirectory(prefix="malkus-rp-frames-") as temp_dir:
