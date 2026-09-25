@@ -65,6 +65,19 @@ def test_wind_catalogue_has_event_and_year_coordinates(
     assert footprints.data.attrs["is_synthetic"] is True
 
 
+def test_parallel_winds_match_serial_winds(multi_trackset: Callable[[], TrackSet]):
+    trackset = multi_trackset()
+    grid = RegularGrid.from_bbox((119.5, 9.5, 121.0, 11.0), 0.25)
+
+    serial = compute_winds(trackset, grid, n_workers=1, batch_size=1)
+    parallel = compute_winds(trackset, grid, n_workers=2, batch_size=1)
+
+    assert parallel.event_ids.tolist() == serial.event_ids.tolist()
+    np.testing.assert_allclose(
+        parallel.data.max_wind_speed_ms, serial.data.max_wind_speed_ms
+    )
+
+
 def test_winds_require_a_resolved_wind_reference(
     track_frame: Callable[[], pd.DataFrame],
 ):
@@ -85,6 +98,8 @@ def test_winds_write_optional_qc_parquet_outputs(
         grid,
         interpolated_tracks_path=interpolated_path,
         storm_qc_path=summary_path,
+        n_workers=2,
+        batch_size=1,
     )
     interpolated = pd.read_parquet(interpolated_path)
     summary = pd.read_parquet(summary_path)
