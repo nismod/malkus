@@ -25,25 +25,6 @@ REQUIRED_COLUMNS = frozenset(
     }
 )
 
-OPTIONAL_COLUMNS = frozenset(
-    {
-        "timestep",
-        "sample",
-        "source_year",
-        "calibration_year",
-        "tc_number",
-        "ss_category",
-        "environmental_pressure_hpa",
-        "holland_b",
-        "outer_radius_km",
-        "translation_speed_ms",
-        "translation_heading_deg",
-        "storm_motion_u_ms",
-        "storm_motion_v_ms",
-        "geometry",
-    }
-)
-
 _NUMERIC_COLUMNS = frozenset(
     {
         "lat",

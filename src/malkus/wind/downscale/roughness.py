@@ -1,8 +1,6 @@
 """Land-cover roughness preparation and power-law wind downscaling."""
 
 from pathlib import Path
-from typing import Callable
-
 import numpy as np
 import pandas as pd
 import rasterio
@@ -142,6 +140,3 @@ class SurfaceRoughness:
             surface_height_m=self.surface_height_m,
             gradient_height_m=self.gradient_height_m,
         )
-
-
-DownscalingMethod = Callable[[RegularGrid], np.ndarray]
