@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm, Normalize
+from matplotlib.colors import BoundaryNorm
 import numpy as np
 import xarray as xr
 
@@ -19,6 +19,9 @@ WIND_VMAX = 72.0
 WIND_INTERVAL = 3.0
 WIND_CMAP = "magma_r"
 IQR_CMAP = "viridis"
+IQR_VMIN = 0.0
+IQR_VMAX = 15.0
+IQR_INTERVAL = 1.0
 
 
 def main() -> None:
@@ -40,10 +43,13 @@ def main() -> None:
     wind_cmap.set_under("white")
     wind_norm = BoundaryNorm(wind_levels, wind_cmap.N, clip=False)
 
-    iqr_max = float(np.nanmax(data.iqr_wind_speed_ms.values))
-    if not np.isfinite(iqr_max):
+    iqr_values = data.iqr_wind_speed_ms.values
+    if not np.isfinite(iqr_values).any():
         raise ValueError("IQR maps contain no finite values")
-    iqr_norm = Normalize(vmin=0.0, vmax=iqr_max if iqr_max > 0 else 1.0)
+    iqr_levels = np.arange(IQR_VMIN, IQR_VMAX + IQR_INTERVAL, IQR_INTERVAL)
+    iqr_cmap = plt.get_cmap(IQR_CMAP, len(iqr_levels) - 1).copy()
+    iqr_cmap.set_over("white")
+    iqr_norm = BoundaryNorm(iqr_levels, iqr_cmap.N, clip=False)
 
     for period in data.return_period.values:
         mean = data.mean_wind_speed_ms.sel(return_period=period)
@@ -60,7 +66,7 @@ def main() -> None:
             iqr,
             origin="lower",
             extent=extent,
-            cmap=IQR_CMAP,
+            cmap=iqr_cmap,
             norm=iqr_norm,
         )
         axes[0].set_title("Mean wind speed")
@@ -74,7 +80,13 @@ def main() -> None:
             ticks=wind_levels,
             label=r"Wind speed [m s$^{-1}$]",
         )
-        fig.colorbar(iqr_image, ax=axes[1], label=r"IQR [m s$^{-1}$]")
+        fig.colorbar(
+            iqr_image,
+            ax=axes[1],
+            ticks=iqr_levels,
+            extend="max",
+            label=r"IQR [m s$^{-1}$]",
+        )
         fig.suptitle(f"{args.title}: {float(period):g}-year return period")
         fig.savefig(args.output_dir / f"return_period_{float(period):g}_year.png", dpi=150)
         plt.close(fig)
