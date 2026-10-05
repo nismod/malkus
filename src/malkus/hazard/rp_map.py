@@ -174,6 +174,80 @@ def return_period_maps(
     return ReturnPeriodMapSet.open(output)
 
 
+def pool_return_period_maps(
+    maps: list[ReturnPeriodMapSet],
+    *,
+    weights: list[float] | np.ndarray | xr.DataArray | None = None,
+    output: str | Path | None = None,
+) -> xr.Dataset:
+    """Pool compatible return-period maps and calculate weighted mean and IQR."""
+
+    if not maps:
+        raise ValueError("At least one return-period map is required")
+    reference = maps[0].data
+    for index, map_set in enumerate(maps[1:], start=2):
+        data = map_set.data
+        for coordinate in ("return_period", "lat", "lon"):
+            if not np.array_equal(data[coordinate].values, reference[coordinate].values):
+                raise ValueError(
+                    f"Map {index} has different {coordinate} coordinates from map 1"
+                )
+        if not np.isclose(
+            float(data.attrs["grid_resolution_deg"]),
+            float(reference.attrs["grid_resolution_deg"]),
+        ):
+            raise ValueError(f"Map {index} has a different grid resolution from map 1")
+
+    if weights is None:
+        weight_values = np.ones(len(maps), dtype=float)
+    else:
+        weight_values = np.asarray(weights, dtype=float)
+    if weight_values.ndim != 1 or len(weight_values) != len(maps):
+        raise ValueError("weights must contain one value per return-period map")
+    if not np.isfinite(weight_values).all() or (weight_values < 0).any():
+        raise ValueError("weights must be finite and non-negative")
+    if not weight_values.any():
+        raise ValueError("At least one weight must be positive")
+
+    stacked = xr.concat(
+        [map_set.data.astype(np.float32) for map_set in maps], dim="pool_member"
+    )
+    pool_weights = xr.DataArray(weight_values, dims="pool_member")
+    weighted = stacked.weighted(pool_weights)
+    mean = weighted.mean(dim="pool_member", skipna=True)
+    quantiles = weighted.quantile([0.25, 0.75], dim="pool_member", skipna=True)
+    # broadcast_like to recover any dimension dropped because its length was 1
+    iqr = (
+        quantiles.sel(quantile=0.75) - quantiles.sel(quantile=0.25)
+    ).broadcast_like(reference).transpose(*reference.dims)
+    pooled = xr.Dataset(
+        data_vars={
+            "mean_wind_speed_ms": mean,
+            "iqr_wind_speed_ms": iqr,
+        },
+        coords={
+            "return_period": reference["return_period"].values,
+            "lat": reference["lat"].values,
+            "lon": reference["lon"].values,
+        },
+        attrs={
+            "grid_resolution_deg": reference.attrs["grid_resolution_deg"],
+            **(
+                {"plotting_position": reference.attrs["plotting_position"]}
+                if "plotting_position" in reference.attrs
+                else {}
+            ),
+            "pool_size": len(maps),
+            "pool_weight_sum": float(weight_values.sum()),
+        },
+    )
+    if output is not None:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pooled.to_zarr(output_path, mode="w", consolidated=False)
+    return pooled
+
+
 def _validate_return_period_maps(data: xr.DataArray) -> None:
     if data.name != WIND_VARIABLE:
         raise ValueError(f"Return-period maps must be named {WIND_VARIABLE!r}")

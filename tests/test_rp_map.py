@@ -13,6 +13,7 @@ from malkus import (
     WindFootprintSet,
     downscale_winds,
     initialize_wind_footprints,
+    pool_return_period_maps,
     return_period_maps,
 )
 
@@ -115,3 +116,81 @@ def test_downscale_and_return_period_reject_incomplete_stores(
     store = initialize_wind_footprints(tmp_path / "winds.zarr", multi_trackset(), grid)
     with pytest.raises(ValueError, match="incomplete"):
         downscale_winds(store, method=lambda _: np.ones(grid.shape))
+
+
+def test_pool_return_period_maps_calculates_mean_iqr_and_persists(tmp_path):
+    coords = {
+        "return_period": [5.0, 10.0],
+        "lat": [10.0],
+        "lon": [120.0, 121.0],
+    }
+    attrs = {"grid_resolution_deg": 1.0, "epoch": 2020}
+    values = [
+        np.array([[[10.0, np.nan]], [[20.0, 20.0]]]),
+        np.array([[[20.0, 30.0]], [[30.0, 40.0]]]),
+        np.array([[[30.0, 50.0]], [[40.0, 60.0]]]),
+    ]
+    maps = [
+        ReturnPeriodMapSet(
+            data=xr.DataArray(value, dims=("return_period", "lat", "lon"), coords=coords, name="max_wind_speed_ms", attrs=attrs)
+        )
+        for value in values
+    ]
+    output = tmp_path / "pooled.zarr"
+    pooled = pool_return_period_maps(maps, output=output)
+    np.testing.assert_allclose(pooled.mean_wind_speed_ms.values, [[[20.0, 40.0]], [[30.0, 40.0]]])
+    np.testing.assert_allclose(pooled.iqr_wind_speed_ms.values, [[[10.0, 10.0]], [[10.0, 20.0]]])
+    assert pooled.attrs["pool_size"] == 3
+    assert "epoch" not in pooled.attrs
+    reopened = xr.open_zarr(output, consolidated=False)
+    np.testing.assert_allclose(reopened.mean_wind_speed_ms, pooled.mean_wind_speed_ms)
+
+
+def test_pool_return_period_maps_rejects_mismatched_coordinates():
+    base = xr.DataArray(
+        np.ones((1, 1, 1)),
+        dims=("return_period", "lat", "lon"),
+        coords={"return_period": [5.0], "lat": [10.0], "lon": [120.0]},
+        name="max_wind_speed_ms",
+        attrs={"grid_resolution_deg": 1.0},
+    )
+    other = base.assign_coords(lon=[121.0])
+    with pytest.raises(ValueError, match="different lon"):
+        pool_return_period_maps([ReturnPeriodMapSet(data=base), ReturnPeriodMapSet(data=other)])
+
+
+def test_pool_return_period_maps_applies_weights():
+    coords = {"return_period": [5.0], "lat": [10.0], "lon": [120.0]}
+    attrs = {"grid_resolution_deg": 1.0}
+    maps = [
+        ReturnPeriodMapSet(
+            data=xr.DataArray(
+                [[[value]]],
+                dims=("return_period", "lat", "lon"),
+                coords=coords,
+                name="max_wind_speed_ms",
+                attrs=attrs,
+            )
+        )
+        for value in (10.0, 20.0, 30.0)
+    ]
+
+    pooled = pool_return_period_maps(maps, weights=[2.0, 1.0, 1.0])
+
+    np.testing.assert_allclose(pooled.mean_wind_speed_ms, [[[17.5]]])
+    np.testing.assert_allclose(pooled.iqr_wind_speed_ms, [[[10.8333333333333]]])
+    assert pooled.attrs["pool_weight_sum"] == 4.0
+
+
+@pytest.mark.parametrize("weights", ([1.0], [1.0, np.nan], [-1.0, 1.0], [0.0, 0.0]))
+def test_pool_return_period_maps_rejects_invalid_weights(weights):
+    data = xr.DataArray(
+        np.ones((1, 1, 1)),
+        dims=("return_period", "lat", "lon"),
+        coords={"return_period": [5.0], "lat": [10.0], "lon": [120.0]},
+        name="max_wind_speed_ms",
+        attrs={"grid_resolution_deg": 1.0},
+    )
+    maps = [ReturnPeriodMapSet(data=data), ReturnPeriodMapSet(data=data.copy())]
+    with pytest.raises(ValueError, match="weights|weight"):
+        pool_return_period_maps(maps, weights=weights)

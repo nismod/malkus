@@ -7,7 +7,7 @@ from .hazard.footprint import (
     initialize_wind_footprints,
 )
 from .hazard.grid.grid import RegularGrid
-from .hazard.rp_map import ReturnPeriodMapSet, return_period_maps
+from .hazard.rp_map import ReturnPeriodMapSet, pool_return_period_maps, return_period_maps
 from .tracks.trackset import TrackSet
 from .tracks.source import TrackSource, WindSpeedReference
 from .wind.downscale.roughness import SurfaceRoughness, surface_roughness_factors
@@ -27,6 +27,7 @@ __all__ = [
     "evaluate_at_points",
     "holland_1980",
     "initialize_wind_footprints",
+    "pool_return_period_maps",
     "return_period_maps",
     "surface_roughness_factors",
 ]
