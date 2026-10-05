@@ -69,7 +69,9 @@ def main() -> None:
             )
         counts = Counter(sources)
         weights = [1.0 / counts[source] for source in sources]
-        logging.info("Equal source weights: %s", dict(sorted(counts.items())))
+        logging.info(
+            "Per-map weights: %s", {source: round(1.0 / counts[source], 3) for source in sources}
+        )
     pool_return_period_maps(selected, weights=weights, output=args.output)
     logging.info("Pooled %d maps into %s", len(selected), args.output)
 
