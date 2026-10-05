@@ -180,7 +180,11 @@ def pool_return_period_maps(
     weights: list[float] | np.ndarray | xr.DataArray | None = None,
     output: str | Path | None = None,
 ) -> xr.Dataset:
-    """Pool compatible return-period maps and calculate weighted mean and IQR."""
+    """
+    Pool compatible return-period maps and calculate weighted mean and IQR.
+    
+    N.B. `maps` and `weights` are mapped purely by their order.
+    """
 
     if not maps:
         raise ValueError("At least one return-period map is required")
