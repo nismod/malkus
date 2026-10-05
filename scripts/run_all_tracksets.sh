@@ -57,3 +57,25 @@ while IFS= read -r -d '' tracks; do
         --land-cover "$LAND_COVER" \
         --roughness-mapping "$ROUGHNESS_MAPPING"
 done < <(find "$TRACK_ROOT" -type f -path '*/tracks.geoparquet' -print0 | sort -z)
+
+POOLED_RP_MAPS="$OUTPUT_DIR/hazard_maps/$NAME/pooled-contemporary.zarr"
+POOLED_RP_PLOTS="$OUTPUT_DIR/hazard_maps/$NAME/pooled-contemporary-plots"
+pixi run python scripts/pool_rp_maps.py \
+    "$OUTPUT_DIR/hazard_maps/$NAME" \
+    "$POOLED_RP_MAPS" \
+    --epoch-before 2030 \
+    --equal-source-weights
+pixi run python scripts/plot_pooled_rp_maps.py \
+    "$POOLED_RP_MAPS" \
+    "$POOLED_RP_PLOTS"
+
+POOLED_RP_MAPS="$OUTPUT_DIR/hazard_maps/$NAME/pooled-future.zarr"
+POOLED_RP_PLOTS="$OUTPUT_DIR/hazard_maps/$NAME/pooled-future-plots"
+pixi run python scripts/pool_rp_maps.py \
+    "$OUTPUT_DIR/hazard_maps/$NAME" \
+    "$POOLED_RP_MAPS" \
+    --epoch-after 2030 \
+    --equal-source-weights
+pixi run python scripts/plot_pooled_rp_maps.py \
+    "$POOLED_RP_MAPS" \
+    "$POOLED_RP_PLOTS"
