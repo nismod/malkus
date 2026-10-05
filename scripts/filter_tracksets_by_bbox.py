@@ -46,9 +46,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _infer_source(folder: Path) -> TrackSource:
-    name = folder.name.lower()
     for source in TrackSource:
-        if name.startswith(source.value):
+        if source.value in folder.name.lower():
             return source
     raise ValueError(
         f"Cannot infer TrackSource from {folder.name!r}; pass --source explicitly"
